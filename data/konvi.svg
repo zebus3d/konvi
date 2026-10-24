@@ -4,15 +4,41 @@
       <stop offset="0" stop-color="#3d8ff0"/>
       <stop offset="1" stop-color="#6a4ce0"/>
     </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3d8ff0"/>
+      <stop offset="1" stop-color="#6a4ce0"/>
+    </linearGradient>
   </defs>
-  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg)"/>
-  <!-- dos flechas que giran: convertir -->
-  <g fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round">
-    <path d="M 32 58 A 33 33 0 0 1 90 40"/>
-    <path d="M 96 70 A 33 33 0 0 1 38 88"/>
+  <!-- fondo -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <rect x="8" y="8" width="112" height="56" rx="26" fill="url(#shine)"/>
+  <rect x="8.5" y="8.5" width="111" height="111" rx="25.5" fill="none" stroke="#000000" stroke-opacity="0.15"/>
+  <!-- el original: fotograma de película, detrás -->
+  <g transform="rotate(-8 46 47)">
+    <rect x="18" y="28" width="58" height="40" rx="7" fill="#ffffff" fill-opacity="0.38"/>
+    <g fill="#ffffff" fill-opacity="0.7">
+      <rect x="23" y="32" width="6" height="4" rx="1.5"/>
+      <rect x="34" y="32" width="6" height="4" rx="1.5"/>
+      <rect x="45" y="32" width="6" height="4" rx="1.5"/>
+      <rect x="56" y="32" width="6" height="4" rx="1.5"/>
+      <rect x="67" y="32" width="5" height="4" rx="1.5"/>
+      <rect x="23" y="60" width="6" height="4" rx="1.5"/>
+      <rect x="34" y="60" width="6" height="4" rx="1.5"/>
+      <rect x="45" y="60" width="6" height="4" rx="1.5"/>
+      <rect x="56" y="60" width="6" height="4" rx="1.5"/>
+      <rect x="67" y="60" width="5" height="4" rx="1.5"/>
+    </g>
   </g>
-  <path d="M 98 26 L 99 48 L 78 42 Z" fill="#ffffff"/>
-  <path d="M 30 102 L 29 80 L 50 86 Z" fill="#ffffff"/>
-  <!-- play: vídeo -->
-  <path d="M 55 49 L 79 64 L 55 79 Z" fill="#ffffff"/>
+  <!-- el resultado: vídeo listo, delante -->
+  <rect x="44" y="56" width="66" height="46" rx="9" fill="#000000" fill-opacity="0.18" transform="translate(0 3)"/>
+  <rect x="44" y="56" width="66" height="46" rx="9" fill="#ffffff"/>
+  <circle cx="77" cy="79" r="14" fill="none" stroke="url(#play)" stroke-width="4.5"/>
+  <path d="M 72.5 71.5 L 84 79 L 72.5 86.5 Z" fill="url(#play)" stroke="url(#play)" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- flecha: convertir -->
+  <path d="M 84 25 Q 101 26 101 42" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M 92 40 L 110 40 L 101 51 Z" fill="#ffffff" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
 </svg>
