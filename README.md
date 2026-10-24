@@ -172,3 +172,10 @@ python3 -m unittest tests.test_core tests.test_i18n   # el motor y las traduccio
 python3 -m unittest tests.test_real_conversions  # cada perfil con ffmpeg de verdad (~1 min)
 python3 -m unittest tests.test_ui                # la ventana, sin pantalla
 ```
+
+## Licencia
+
+Konvi es software libre: puedes usarlo, estudiarlo, modificarlo y redistribuirlo bajo los
+términos de la [GNU General Public License](LICENSE), versión 3 o (a tu elección) cualquier
+versión posterior. Es la misma familia de licencias que ffmpeg (compilado con x264/x265) y
+HandBrake.
