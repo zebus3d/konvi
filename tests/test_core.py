@@ -1,0 +1,280 @@
+"""Pruebas del motor sin ffmpeg (milisegundos):  python3 -m unittest tests.test_core"""
+
+import tempfile
+import unittest
+from dataclasses import replace
+from pathlib import Path
+
+from konvi.core import command, naming, presets
+from konvi.core.jobs import Job, Status, expand_paths
+from konvi.core.probe import AudioInfo, MediaInfo, VideoInfo, format_duration, parse
+from konvi.core.progress import Progress, format_eta
+
+P = presets.builtin_by_id()
+
+
+def media(w=1920, h=1080, fps=25.0, pix="yuv420p", depth=8, interlaced=False, audio=(("aac", 2, 128000),),
+          subs=(), duration=60.0, vcodec="h264"):
+    video = VideoInfo(vcodec, w, h, fps, pix, depth, interlaced) if w else None
+    return MediaInfo("/v/in.mp4", duration, 10_000_000, "mov,mp4", video,
+                     tuple(AudioInfo(c, ch, br, "") for c, ch, br in audio), tuple(subs))
+
+
+def args_for(info, preset, **kw):
+    return command.build(info, preset, "/v/out." + preset.container, **kw)
+
+
+def value(args, flag):
+    return args[args.index(flag) + 1] if flag in args else None
+
+
+class CommandTests(unittest.TestCase):
+    def test_h264_basico(self):
+        a = args_for(media(), P["mp4_h264"])
+        self.assertEqual(value(a, "-c:v"), "libx264")
+        self.assertEqual(value(a, "-crf"), "20")
+        self.assertEqual(value(a, "-pix_fmt"), "yuv420p")
+        self.assertIn("+faststart", a)
+        self.assertNotIn("-vf", a)                  # nada que reducir ni recortar
+        self.assertEqual(a[-1], "/v/out.mp4")
+
+    def test_reduce_pero_nunca_agranda(self):
+        self.assertEqual(value(args_for(media(3840, 2160), P["mp4_h264_1080"]), "-vf"),
+                         "scale=-2:1080:flags=lanczos")
+        self.assertNotIn("-vf", args_for(media(1280, 720), P["mp4_h264_1080"]))
+
+    def test_vertical_limita_el_lado_corto(self):
+        self.assertEqual(value(args_for(media(1080, 1920), P["mp4_h264_720"]), "-vf"),
+                         "scale=720:-2:flags=lanczos")
+
+    def test_tamano_impar_se_recorta_a_par(self):
+        self.assertEqual(value(args_for(media(1279, 721), P["mp4_h264"]), "-vf"),
+                         "crop=trunc(iw/2)*2:trunc(ih/2)*2")
+        self.assertNotIn("-vf", args_for(media(1279, 721), P["mkv_ffv1"]))   # FFV1 no lo necesita
+
+    def test_entrelazado_y_fps(self):
+        vf = value(args_for(media(fps=50, interlaced=True), P["web_whatsapp"]), "-vf")
+        self.assertTrue(vf.startswith("bwdif"))
+        self.assertIn("fps=30", vf)
+
+    def test_mpeg2_ajusta_cadencias_raras(self):
+        # la cadencia de tele más cercana a 15
+        self.assertIn("fps=23.976", value(args_for(media(fps=15), P["mpeg_mpeg2"]), "-vf"))
+
+    def test_diez_bits(self):
+        self.assertEqual(value(args_for(media(pix="yuv420p10le", depth=10), P["mp4_h265"]), "-pix_fmt"),
+                         "yuv420p10le")
+        self.assertEqual(value(args_for(media(pix="yuv420p10le", depth=10), P["mp4_h264"]), "-pix_fmt"),
+                         "yuv420p")
+
+    def test_h265_en_mp4_lleva_hvc1(self):
+        self.assertEqual(value(args_for(media(), P["mp4_h265"]), "-tag:v"), "hvc1")
+        self.assertNotIn("-tag:v", args_for(media(), P["mkv_h265"]))
+
+    def test_audio_compatible_se_copia(self):
+        a = args_for(media(), P["mp4_h264"])
+        self.assertEqual(value(a, "-c:a:0"), "copy")
+
+    def test_audio_demasiado_grande_se_recodifica(self):
+        a = args_for(media(audio=(("aac", 2, 320000),)), P["web_whatsapp"])
+        self.assertEqual(value(a, "-c:a:0"), "aac")
+        self.assertEqual(value(a, "-b:a:0"), "128k")
+
+    def test_bajar_a_estereo(self):
+        a = args_for(media(audio=(("aac", 6, 128000),)), P["web_whatsapp"])
+        self.assertEqual(value(a, "-ac:a:0"), "2")
+
+    def test_opus_5_1(self):
+        a = args_for(media(audio=(("ac3", 6, 448000),)), P["mkv_av1"])
+        self.assertEqual(value(a, "-filter:a:0"), "aformat=channel_layouts=5.1")
+
+    def test_todas_las_pistas_y_subtitulos_en_mkv(self):
+        info = media(audio=(("aac", 2, 128000), ("ac3", 6, 448000)), subs=("subrip", "mov_text"))
+        a = args_for(info, P["mkv_h264"])
+        self.assertIn("0:a:1", a)
+        self.assertEqual(value(a, "-c:s:1"), "srt")
+        self.assertNotIn("-sn", a)
+        self.assertIn("-sn", args_for(info, P["mp4_h264"]))
+
+    def test_sin_audio(self):
+        self.assertIn("-an", args_for(media(audio=()), P["mp4_h264"]))
+
+    def test_solo_audio(self):
+        a = args_for(media(), P["audio_mp3"])
+        self.assertIn("-vn", a)
+        self.assertEqual(value(a, "-c:a:0"), "libmp3lame")
+
+    def test_errores_claros(self):
+        self.assertIn("Solo audio", command.check(media(w=0), P["mp4_h264"]))
+        self.assertIn("no tiene sonido", command.check(media(audio=()), P["audio_mp3"]))
+        self.assertIn("demasiado largo", command.check(media(duration=7200), P["web_discord"]))
+        with self.assertRaises(command.ConvertError):
+            args_for(media(w=0), P["mp4_h264"])
+
+    def test_tamano_objetivo_cabe(self):
+        info = media(duration=60)
+        p = P["web_discord"]
+        kbps = command.target_video_kbps(info, p)
+        # el peor caso (bitrate máximo + búfer de 1 s) cabe en el tamaño
+        worst_kbit = kbps * (info.duration + 1) + p.audio_kbps * info.duration
+        self.assertLessEqual(worst_kbit, p.target_mb * 1024 * 8)
+        a = args_for(info, p)
+        self.assertEqual(value(a, "-maxrate"), f"{kbps}k")
+        self.assertNotEqual(value(a, "-c:a:0"), "copy")
+
+    def test_sin_perdida(self):
+        a = args_for(media(pix="rgb24", w=1279), P["mp4_lossless"])
+        self.assertEqual(value(a, "-c:v"), "libx264rgb")
+        self.assertEqual(value(a, "-qp"), "0")
+        self.assertNotIn("-vf", a)                    # RGB: no hace falta recortar
+        a = args_for(media(pix="yuv420p10le", depth=10), P["mp4_lossless"])
+        self.assertEqual(value(a, "-c:v"), "libx264")
+        self.assertNotIn("-pix_fmt", a)               # conserva el formato de color del original
+
+    def test_tarjeta_grafica(self):
+        hw = command.Hardware(nvenc=frozenset({"h264", "h265"}))
+        a = args_for(media(), P["mp4_h264"], hardware=hw, use_hardware=True)
+        self.assertEqual(value(a, "-c:v"), "h264_nvenc")
+        self.assertTrue(command.uses_hardware(a))
+        # lo que la tarjeta no hace, va por el procesador
+        self.assertEqual(value(args_for(media(), P["mp4_av1"], hardware=hw, use_hardware=True), "-c:v"),
+                         "libsvtav1")
+        self.assertEqual(value(args_for(media(), P["mp4_lossless"], hardware=hw, use_hardware=True), "-c:v"),
+                         "libx264")
+        vaapi = command.Hardware(vaapi=frozenset({"h264"}))
+        a = args_for(media(), P["mp4_h264"], hardware=vaapi, use_hardware=True)
+        self.assertIn("hwupload", value(a, "-vf"))
+        self.assertLess(a.index("-vaapi_device"), a.index("-i"))
+
+    def test_dvd(self):
+        a = args_for(media(), P["mpeg_dvd"])
+        self.assertEqual(value(a, "-target"), "pal-dvd")
+        self.assertEqual(value(a, "-aspect"), "16:9")
+        self.assertEqual(value(args_for(media(720, 576), P["mpeg_dvd"]), "-aspect"), "4:3")
+
+    def test_todos_los_perfiles_generan_comando(self):
+        for p in presets.BUILTIN:
+            with self.subTest(p.id):
+                info = media(duration=20)
+                if p.target_mb is None or command.check(info, p) is None:
+                    self.assertEqual(args_for(info, p)[0], "ffmpeg")
+
+
+class PresetTests(unittest.TestCase):
+    def test_ids_unicos_y_categorias_conocidas(self):
+        ids = [p.id for p in presets.BUILTIN]
+        self.assertEqual(len(ids), len(set(ids)))
+        cats = {c.id for c in presets.CATEGORIES}
+        for p in presets.BUILTIN:
+            self.assertIn(p.category, cats)
+            self.assertTrue(p.description)
+        for c in presets.CATEGORIES:
+            if c.id != "custom":
+                self.assertTrue(any(p.category == c.id for p in presets.BUILTIN), c.id)
+        self.assertIn(presets.DEFAULT_ID, ids)
+
+    def test_guardar_y_leer_perfiles_propios(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sub" / "presets.json"
+            mine = replace(P["mp4_h264"], id="custom_1", name="Mío", quality=26, category="custom", custom=True)
+            presets.save_custom(path, [mine])
+            self.assertEqual(presets.load_custom(path), [mine])
+            self.assertEqual(presets.new_custom_id([mine]), "custom_2")
+
+    def test_fichero_de_perfiles_roto_no_tumba_nada(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "presets.json"
+            path.write_text('[{"id": "x"}, 3, "basura", {"id": "ok", "category": "mp4", "name": "Bien",'
+                            ' "description": "", "container": "mp4", "campo_nuevo": 1}]')
+            loaded = presets.load_custom(path)
+            self.assertEqual([p.id for p in loaded], ["ok"])
+            self.assertEqual(presets.load_custom(Path(d) / "no_existe.json"), [])
+
+
+class ProbeTests(unittest.TestCase):
+    def test_parse(self):
+        info = parse({
+            "format": {"duration": "12.5", "size": "1000", "format_name": "mov"},
+            "streams": [
+                {"codec_type": "video", "codec_name": "mjpeg", "width": 300, "height": 300,
+                 "disposition": {"attached_pic": 1}},
+                {"codec_type": "video", "codec_name": "hevc", "width": 1920, "height": 1080,
+                 "avg_frame_rate": "30000/1001", "pix_fmt": "yuv420p10le", "field_order": "progressive",
+                 "side_data_list": [{"rotation": -90}]},
+                {"codec_type": "audio", "codec_name": "aac", "channels": 6, "bit_rate": "384000",
+                 "tags": {"language": "spa"}},
+                {"codec_type": "subtitle", "codec_name": "mov_text"},
+            ]}, "/x.mov")
+        v = info.video
+        self.assertEqual((v.codec, v.width, v.height, v.bit_depth), ("hevc", 1080, 1920, 10))
+        self.assertAlmostEqual(v.fps, 29.97, places=2)
+        self.assertEqual(info.audio[0].channels, 6)
+        self.assertEqual(info.subtitles, ("mov_text",))
+        self.assertIn("5.1", info.summary())
+
+    def test_duracion(self):
+        self.assertEqual(format_duration(83), "1:23")
+        self.assertEqual(format_duration(3723), "1:02:03")
+
+
+class ProgressTests(unittest.TestCase):
+    def test_bloques_cortados_por_cualquier_sitio(self):
+        p = Progress(100)
+        text = "frame=10\nout_time_us=25000000\nspeed=2.5x\nprogress=continue\n"
+        for i in range(0, len(text), 7):
+            p.feed(text[i:i + 7])
+        self.assertAlmostEqual(p.fraction, 0.25)
+        self.assertAlmostEqual(p.eta, 30.0)
+        p.feed("out_time_us=N/A\nprogress=end\n")
+        self.assertEqual(p.fraction, 1.0)
+
+    def test_eta(self):
+        self.assertEqual(format_eta(None), "")
+        self.assertEqual(format_eta(42), "42 s")
+        self.assertEqual(format_eta(125), "2 min 05 s")
+        self.assertEqual(format_eta(7300), "2 h 01 min")
+
+
+class NamingTests(unittest.TestCase):
+    def test_no_pisa_nada(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "clip.mp4"
+            src.touch()
+            self.assertEqual(naming.output_path(src, "mp4").name, "clip (2).mp4")      # el original
+            self.assertEqual(naming.output_path(src, "mkv").name, "clip.mkv")
+            self.assertEqual(naming.output_path(src, "mkv", taken=[Path(d) / "clip.mkv"]).name,
+                             "clip (2).mkv")                                         # otro de la cola
+            (Path(d) / "clip.mkv").touch()
+            self.assertEqual(naming.output_path(src, "mkv").name, "clip (2).mkv")
+            self.assertEqual(naming.output_path(src, "mkv", folder=Path(d) / "otra").parent.name, "otra")
+
+    def test_temporal_conserva_la_extension(self):
+        self.assertEqual(naming.temp_path(Path("/a/clip (2).mp4")).name, "clip (2).konvi-tmp.mp4")
+
+
+class JobTests(unittest.TestCase):
+    def test_ciclo_de_estados(self):
+        job = Job(Path("/v/a.mp3"), P["mp4_h264"])
+        self.assertEqual(job.status, Status.PROBING)
+        job.set_probed(media(w=0))
+        self.assertEqual(job.status, Status.INVALID)          # un mp3 con perfil de vídeo
+        job.set_preset(P["audio_mp3"])
+        self.assertEqual(job.status, Status.READY)
+        job.status = Status.DONE
+        job.reset()
+        self.assertEqual(job.status, Status.READY)
+        bad = Job(Path("/v/x"), P["mp4_h264"])
+        bad.set_probed(None, "No se lee")
+        self.assertEqual((bad.status, bad.message), (Status.INVALID, "No se lee"))
+
+    def test_carpetas(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "sub").mkdir()
+            for name in ("a.MP4", "sub/b.mkv", "notas.txt", "c.konvi-tmp.mp4"):
+                (d / name).touch()
+            self.assertEqual(sorted(p.name for p in expand_paths([d])), ["a.MP4", "b.mkv"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=video/*;audio/*;inode/directory;
+Actions=konvi;
+X-KDE-Priority=TopLevel
+
+[Desktop Action konvi]
+Name=Convertir con Konvi
+Icon=konvi
+Exec="@KONVI@" %F
