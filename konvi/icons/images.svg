@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fd3f7"/>
+      <stop offset="1" stop-color="#d4f1fb"/>
+    </linearGradient>
+  </defs>
+  <!-- tira de película detrás -->
+  <g transform="rotate(-14 20 22)">
+    <rect x="5" y="6" width="20" height="34" rx="2.5" fill="#5d6879"/>
+    <rect x="8" y="9" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="8" y="15" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="8" y="21" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="8" y="27" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="8" y="33" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="19.5" y="9" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="19.5" y="15" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="19.5" y="21" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="19.5" y="27" width="2.5" height="2.5" fill="#eff0f1"/>
+    <rect x="19.5" y="33" width="2.5" height="2.5" fill="#eff0f1"/>
+  </g>
+  <!-- foto delante -->
+  <rect x="17" y="15" width="28" height="25" rx="3" fill="#ffffff" stroke="#27ae60" stroke-width="1.5"/>
+  <rect x="20" y="18" width="22" height="19" rx="1.5" fill="url(#sky)"/>
+  <circle cx="36.5" cy="22.5" r="2.6" fill="#fdbc4b"/>
+  <path d="M 20 37 L 20 33 L 26.5 25.5 L 31.5 31 L 34.5 28 L 42 35 L 42 37 Z" fill="#27ae60"/>
+</svg>

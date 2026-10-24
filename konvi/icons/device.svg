@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="scr" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4fc3f7"/>
+      <stop offset="1" stop-color="#5c6bc0"/>
+    </linearGradient>
+    <linearGradient id="scr2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#80deea"/>
+      <stop offset="1" stop-color="#26a69a"/>
+    </linearGradient>
+  </defs>
+  <!-- TV -->
+  <rect x="2" y="7" width="36" height="25" rx="3.5" fill="#5d6879"/>
+  <rect x="4.5" y="9.5" width="31" height="20" rx="1.5" fill="url(#scr)"/>
+  <path d="M 14 37 L 26 37" stroke="#5d6879" stroke-width="3" stroke-linecap="round"/>
+  <path d="M 20 32 L 20 37" stroke="#5d6879" stroke-width="3"/>
+  <!-- móvil -->
+  <rect x="29.5" y="16.5" width="16" height="28" rx="3.2" fill="#2e3440" stroke="#7d8898" stroke-width="1"/>
+  <rect x="31.5" y="19.5" width="12" height="20" rx="1" fill="url(#scr2)"/>
+  <rect x="35.5" y="41.5" width="4" height="1.5" rx="0.75" fill="#aab4c2"/>
+</svg>

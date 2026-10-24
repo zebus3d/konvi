@@ -5,9 +5,9 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from konvi.core import command, naming, presets
+from konvi.core import command, naming, presets, sequence
 from konvi.core.jobs import Job, Status, expand_paths
-from konvi.core.probe import AudioInfo, MediaInfo, VideoInfo, format_duration, parse
+from konvi.core.probe import AudioInfo, MediaInfo, VideoInfo, format_duration, parse, sequence_info
 from konvi.core.progress import Progress, format_eta
 
 P = presets.builtin_by_id()
@@ -330,6 +330,118 @@ class JobTests(unittest.TestCase):
             for name in ("a.MP4", "sub/b.mkv", "notas.txt", "c.konvi-tmp.mp4"):
                 (d / name).touch()
             self.assertEqual(sorted(p.name for p in expand_paths([d])), ["a.MP4", "b.mkv"])
+
+
+class SequenceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def touch(self, *names):
+        for n in names:
+            (self.dir / n).write_bytes(b"")
+        return [self.dir / n for n in names]
+
+    def test_agrupa_por_prefijo_y_relleno(self):
+        files = self.touch("render_0001.png", "render_0002.png", "render_10000.png",
+                           "otra.0001.exr", "otra.0002.exr", "suelta.png", "notas.txt")
+        found = {s.name: s for s in sequence.find(files)}
+        self.assertEqual(set(found), {"render_####.png", "otra.####.exr"})
+        self.assertEqual(found["render_####.png"].frames, (1, 2, 10000))
+        self.assertEqual(found["render_####.png"].stem, "render")
+
+    def test_sin_ceros_delante(self):
+        seq, = sequence.find(self.touch(*(f"f{n}.jpg" for n in range(1, 11))))
+        self.assertEqual((seq.padding, seq.frames), (1, tuple(range(1, 11))))
+        options, path = seq.input_args(24)
+        self.assertTrue(path.endswith("/f%d.jpg"))
+
+    def test_un_fotograma_trae_la_secuencia_entera(self):
+        files = self.touch("a_001.png", "a_002.png", "a_003.png")
+        seq, = sequence.from_selection(files[1:2])
+        self.assertEqual(seq.frames, (1, 2, 3))
+        seq, = sequence.from_selection(files[:2])       # varios: solo esos
+        self.assertEqual(seq.frames, (1, 2))
+
+    def test_patron_sin_prefijo_y_con_porcentajes(self):
+        seq, = sequence.find(self.touch("0001.exr", "0002.exr"))
+        options, path = seq.input_args(23.976)
+        self.assertEqual(path, f"{self.dir}/%04d.exr")
+        self.assertEqual(value(options, "-framerate"), "24000/1001")
+        self.assertEqual(value(options, "-start_number"), "1")
+        seq, = sequence.find(self.touch("50%_01.png", "50%_02.png"))
+        self.assertTrue(seq.input_args(24)[1].endswith("/50%%_%02d.png"))
+
+    def test_huecos_con_enlaces_seguidos(self):
+        seq, = sequence.find(self.touch("x[1]_8.png", "x[1]_9.png", "x[1]_12.png"))   # sin ceros
+        self.assertEqual(sequence.describe_missing(seq.missing()), "10-11")
+        links = seq.link_frames(self.dir / "enlaces 100%")
+        self.assertEqual(sorted(p.name for p in links.iterdir()), ["000001.png", "000002.png", "000003.png"])
+        self.assertEqual((links / "000003.png").resolve(), (self.dir / "x[1]_12.png").resolve())
+        options, path = seq.input_args(24, links)
+        self.assertEqual(path, f"{self.dir}/enlaces 100%%/%06d.png")
+        self.assertEqual(value(options, "-start_number"), "1")
+
+    def test_carpetas_traen_sus_secuencias(self):
+        self.touch("v.mp4", "r_0001.png", "r_0002.png", "portada.jpg")
+        found = expand_paths([self.dir])
+        self.assertEqual([Path(str(f)).name for f in found], ["v.mp4", "r_####.png"])
+
+    def test_cambiar_fps_cambia_la_duracion(self):
+        seq, = sequence.find(self.touch("r_0001.png", "r_0002.png", "r_0003.png", "r_0004.png"))
+        frame = media(w=320, h=240, fps=25, pix="rgb24", vcodec="png", audio=())
+        info = sequence_info(seq, frame, 24)
+        self.assertEqual((info.frames, info.duration, info.video.fps), (4, 4 / 24, 24))
+        info = sequence_info(seq, info, 2)
+        self.assertEqual(info.duration, 2)
+        job = Job(source=seq, preset=P["mp4_h264"])
+        job.set_probed(info)
+        job.set_fps(4)
+        self.assertEqual(job.info.duration, 1)
+
+    def test_una_sola_imagen_no_es_un_video(self):
+        seq, = sequence.find(self.touch("foto.png"), min_frames=1)
+        info = sequence_info(seq, media(vcodec="png", audio=()), 24)
+        self.assertIn("una sola imagen", command.check(info, P["mp4_h264"]))
+        self.assertEqual(seq.frame_path(seq.first), self.dir / "foto.png")
+        self.assertEqual(len(sequence.from_selection([self.dir / "foto.png"])), 1)
+
+    def test_exr_pasa_de_lineal_a_srgb(self):
+        info = media(pix="gbrapf32le", vcodec="exr", audio=())
+        self.assertIn("zscale=transferin=linear:transfer=iec61966-2-1,format=gbrapf32le",
+                      value(args_for(info, P["mp4_h264"]), "-vf"))
+
+
+class ImageOutputTests(unittest.TestCase):
+    def test_png_jpeg_tiff(self):
+        a = command.build(media(), P["img_png"], "/o/v_%04d.png")
+        self.assertEqual((value(a, "-c:v"), value(a, "-pix_fmt"), value(a, "-f")), ("png", "rgb24", "image2"))
+        self.assertIn("-an", a)
+        a = command.build(media(depth=10, pix="yuv420p10le"), P["img_tiff"], "/o/v_%04d.tif")
+        self.assertEqual(value(a, "-pix_fmt"), "rgb48le")
+        a = command.build(media(pix="rgba", vcodec="png"), P["img_png"], "/o/v_%04d.png")
+        self.assertEqual(value(a, "-pix_fmt"), "rgba")      # conserva la transparencia
+        a = command.build(media(), P["img_jpeg"], "/o/v_%04d.jpg")
+        self.assertEqual((value(a, "-c:v"), value(a, "-q:v")), ("mjpeg", "3"))
+
+    def test_una_por_segundo(self):
+        a = command.build(media(), P["img_jpeg_1s"], "/o/v_%04d.jpg")
+        self.assertIn("fps=1:round=up", value(a, "-vf"))
+
+    def test_carpeta_y_patron(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "clip.mp4"
+            src.write_bytes(b"")
+            (Path(d) / "clip").mkdir()
+            final = naming.output_path(src, "", None)
+            self.assertEqual(final.name, "clip (2)")
+            self.assertEqual(naming.frame_pattern(Path(d) / "tmp%", final, "png", 5),
+                             f"{d}/tmp%%/clip (2)_%05d.png")
+        self.assertEqual(command.frame_digits(media(duration=60, fps=25), P["img_png"]), 4)
+        self.assertEqual(command.frame_digits(media(duration=3600, fps=60), P["img_png"]), 6)
 
 
 if __name__ == "__main__":

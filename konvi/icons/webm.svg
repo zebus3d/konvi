@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3ad6a0"/>
+      <stop offset="1" stop-color="#119b8a"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="40" height="40" rx="9" fill="url(#g)"/>
+  <rect x="4" y="4" width="40" height="40" rx="9" fill="none" stroke="#000000" stroke-opacity="0.12" stroke-width="1"/>
+  <!-- globo -->
+  <g fill="none" stroke="#ffffff" stroke-width="2.2">
+    <circle cx="24" cy="24" r="13"/>
+    <ellipse cx="24" cy="24" rx="5.5" ry="13"/>
+    <path d="M 11.5 20 L 36.5 20"/>
+    <path d="M 11.5 28 L 36.5 28"/>
+  </g>
+  <!-- play delante -->
+  <circle cx="33" cy="33" r="8" fill="#ffffff"/>
+  <path d="M 30.5 29.2 L 37 33 L 30.5 36.8 Z" fill="#119b8a" stroke="#119b8a" stroke-width="1" stroke-linejoin="round"/>
+</svg>

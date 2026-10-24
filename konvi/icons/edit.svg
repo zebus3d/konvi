@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#58616c"/>
+      <stop offset="1" stop-color="#31363b"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="40" height="40" rx="9" fill="url(#g)"/>
+  <!-- pistas de la línea de tiempo -->
+  <rect x="8" y="13" width="17" height="6" rx="2" fill="#ff9a3c"/>
+  <rect x="27" y="13" width="13" height="6" rx="2" fill="#f67400"/>
+  <rect x="8" y="22" width="9" height="6" rx="2" fill="#3daee9"/>
+  <rect x="19" y="22" width="21" height="6" rx="2" fill="#7e57c2"/>
+  <rect x="8" y="31" width="25" height="6" rx="2" fill="#2ecc71"/>
+  <!-- cabezal -->
+  <path d="M 23 11 L 23 39" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 19 7.5 L 27 7.5 L 27 10 L 23 13 L 19 10 Z" fill="#ffffff"/>
+</svg>

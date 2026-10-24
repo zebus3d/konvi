@@ -148,11 +148,16 @@ EN = {
         "Choose videos or audio files to convert (Ctrl+O).\n"
         "You can also drag them onto the window, or a whole folder.",
     "Quitar": "Remove",
-    "Suelta aquí vídeos, audios o carpetas enteras.": "Drop videos, audio files or whole folders here.",
+    "Suelta aquí vídeos, audios, secuencias de imágenes o carpetas enteras.":
+        "Drop videos, audio files, image sequences or whole folders here.",
     "Arrastra aquí tus vídeos": "Drag your videos here",
     "También carpetas enteras, o pulsa «Añadir vídeos…»": "Whole folders too, or click “Add videos…”",
-    "De una carpeta se añaden todos los vídeos y audios que haya dentro,\ntambién los de sus subcarpetas.":
-        "From a folder, every video and audio file inside is added,\nincluding those in its subfolders.",
+    "De una carpeta se añaden todos los vídeos y audios que haya dentro,\n"
+    "también los de sus subcarpetas, y cada secuencia de imágenes\n"
+    "(render_0001.png, render_0002.png…) como si fuera un vídeo.":
+        "From a folder, every video and audio file inside is added,\n"
+        "including those in its subfolders, and each image sequence\n"
+        "(render_0001.png, render_0002.png…) as if it were a video.",
     "Vídeo": "Video",
     "Perfil": "Profile",
     "Estado": "Status",
@@ -207,7 +212,7 @@ EN = {
     "Cancelado": "Cancelled",
     "Se detuvo antes de terminar; no se ha guardado nada.": "It was stopped before finishing; nothing was saved.",
     "Añadir vídeos": "Add videos",
-    "Vídeo y audio ({exts});;Todos los ficheros (*)": "Video and audio ({exts});;All files (*)",
+    "Vídeo, audio e imágenes ({exts});;Todos los ficheros (*)": "Video, audio and images ({exts});;All files (*)",
     "Ver el vídeo convertido": "Watch the converted video",
     "Mostrar en la carpeta": "Show in folder",
     "Ver el original": "Watch the original",
@@ -337,4 +342,71 @@ EN = {
     "No se pudo leer: {error}": "It could not be read: {error}",
     "Algo ha fallado dentro de Konvi:\n{error}\n\nEl detalle está en {log}.":
         "Something went wrong inside Konvi:\n{error}\n\nThe details are in {log}.",
+
+    # ---------------------------------------------------------------- secuencias de imágenes
+    "Imágenes": "Images",
+    "Saca los fotogramas del vídeo como imágenes (PNG, JPEG o TIFF),\ncada vídeo en su propia carpeta.":
+        "Extracts the video frames as images (PNG, JPEG or TIFF),\neach video in its own folder.",
+    "PNG · todos los fotogramas": "PNG · every frame",
+    "Cada fotograma como una imagen PNG, sin pérdida, en una carpeta con el nombre\n"
+    "del vídeo. Para Blender, para retocar fotogramas o para un juego.":
+        "Every frame as a lossless PNG image, in a folder named after the video.\n"
+        "For Blender, for retouching frames or for a game.",
+    "JPEG · todos los fotogramas": "JPEG · every frame",
+    "Cada fotograma como una imagen JPEG: ocupa mucho menos que PNG.":
+        "Every frame as a JPEG image: much smaller than PNG.",
+    "TIFF · todos los fotogramas": "TIFF · every frame",
+    "Sin pérdida y en 16 bits si el original tiene más de 8: para GIMP, Krita,\nPhotoshop o composición.":
+        "Lossless, and 16-bit if the original has more than 8: for GIMP, Krita,\nPhotoshop or compositing.",
+    "JPEG · una imagen por segundo": "JPEG · one image per second",
+    "Una captura de cada segundo del vídeo: para elegir la mejor o ver de un\nvistazo lo que tiene.":
+        "A still from every second of the video: to pick the best one or see\nat a glance what is in it.",
+    "Una imagen por segundo": "One image per second",
+    "Una imagen cada 10 segundos": "One image every 10 seconds",
+    "1 fotograma": "1 frame",
+    "{n} fotogramas": "{n} frames",
+    "{fps} fps": "{fps} fps",
+    "Secuencias de imágenes a:": "Image sequences at:",
+    "Las secuencias de imágenes no dicen a qué velocidad van: elige a cuántos\n"
+    "fotogramas por segundo se convierten. Blender usa 24 de serie.":
+        "Image sequences do not say how fast they play: choose how many\n"
+        "frames per second to convert them at. Blender uses 24 by default.",
+    "Es una sola imagen. Para hacer un vídeo hace falta una secuencia (render_0001.png, render_0002.png…).":
+        "It is a single image. Making a video needs a sequence (render_0001.png, render_0002.png…).",
+    "Faltan {n} fotogramas ({which}): el vídeo se los salta.":
+        "{n} frames are missing ({which}): the video skips them.",
+    "No es una imagen que ffmpeg sepa leer.": "It is not an image ffmpeg can read.",
+    "Las imágenes se guardarán en la carpeta:\n{path}": "The images will be saved in the folder:\n{path}",
+    "Ver las imágenes": "View the images",
+    "Reproducir la secuencia": "Play the sequence",
+    "Mostrar la secuencia en la carpeta": "Show the sequence in its folder",
+
+    # ---------------------------------------------------------------- visor de secuencias
+    "Abrir secuencia": "Open sequence",
+    "Ajustar": "Fit",
+    "Arrastra aquí una imagen o una carpeta con una secuencia": "Drop an image or a folder with a sequence here",
+    "Buscando la secuencia…": "Looking for the sequence…",
+    "Cargando %v de %m": "Loading %v of %m",
+    "Cargando «{name}» ({n} imágenes)…": "Loading “{name}” ({n} images)…",
+    "Clic o arrastrar para ir a un fotograma.\nLa franja verde es lo que ya está en memoria.":
+        "Click or drag to go to a frame.\nThe green strip is what is already in memory.",
+    "Fotograma actual (número del fichero) / total": "Current frame (file number) / total",
+    "Fotograma anterior (←)": "Previous frame (←)",
+    "Fotograma siguiente (→)": "Next frame (→)",
+    "Fotogramas por segundo ([ y ] para cambiar)": "Frames per second ([ and ] to change)",
+    "Imágenes ({exts})": "Images ({exts})",
+    "Leyendo las imágenes a memoria para reproducirlas a tiempo real.\n"
+    "Ya se puede reproducir: avanza según van llegando.":
+        "Reading the images into memory to play them in real time.\n"
+        "You can already play it: it moves on as they arrive.",
+    "No hay imágenes que mostrar en la selección": "There are no images to show in the selection",
+    "No se pudo leer {name}\n{error}": "{name} could not be read\n{error}",
+    "Primer fotograma (Inicio)": "First frame (Home)",
+    "Repetir en bucle (L)": "Loop (L)",
+    "Reproducir / pausa (Espacio)": "Play / pause (Space)",
+    "Zoom: rueda del ratón; mover la imagen: botón central.\nF = ajustar, 1 = 100 %":
+        "Zoom: mouse wheel; move the image: middle button.\nF = fit, 1 = 100 %",
+    "caché {loaded}/{n}": "cache {loaded}/{n}",
+    "{fps} fps reales": "{fps} real fps",
+    "Último fotograma (Fin)": "Last frame (End)",
 }

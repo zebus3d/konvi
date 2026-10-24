@@ -49,6 +49,9 @@ class UiTests(unittest.TestCase):
                             *lavfi, f"sine=duration={secs}", "-c:v", "libx264", "-preset", "ultrafast",
                             "-c:a", "aac", "-shortest", str(d / f"{name}.mp4")], check=True)
         subprocess.run(["ffmpeg", "-v", "error", *lavfi, "sine=duration=1", str(d / "musica.mp3")], check=True)
+        (d / "render").mkdir()
+        subprocess.run(["ffmpeg", "-v", "error", *lavfi, "testsrc2=size=320x240:rate=24:duration=1",
+                        "-start_number", "1", str(d / "render" / "frame_%04d.png")], check=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -126,6 +129,37 @@ class UiTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.out.iterdir()), ["corto.mp4", "musica.m4a"])
         self.assertIn("convertidos", self.w.overall_label.text())
         self.assertTrue(self.w.btn_convert.isVisible())
+
+    def test_secuencia_a_video_y_video_a_imagenes(self):
+        self.assertFalse(self.w.fps_row.isVisible())
+        self.add("render/frame_0007.png", "corto.mp4")         # un fotograma trae toda la secuencia
+        seq = next(j for j in self.w.jobs if j.is_sequence)
+        video = next(j for j in self.w.jobs if not j.is_sequence)
+        self.assertEqual((seq.status, seq.info.frames), (Status.READY, 24))
+        self.assertTrue(self.w.fps_row.isVisible())
+        self.w.fps_combo.setCurrentIndex(self.w.fps_combo.findData(12.0))
+        self.w._fps_activated(self.w.fps_combo.currentIndex())
+        self.assertAlmostEqual(seq.info.duration, 2.0)
+        self.assertEqual(float(self.settings.value("sequence_fps")), 12.0)
+        video.set_preset(P["img_jpeg"])
+        self.w.convert()
+        self.assertTrue(wait_until(lambda: not self.w.runner.running))
+        self.assertEqual([j.status for j in self.w.jobs], [Status.DONE, Status.DONE], [j.message for j in self.w.jobs])
+        self.assertEqual(seq.output, self.out / "frame.mp4")
+        frames = sorted(p.name for p in (self.out / "corto").iterdir())
+        self.assertEqual((len(frames), frames[0]), (25, "corto_0001.jpg"))
+        self.assertFalse(any(".konvi-tmp" in p.name for p in self.out.iterdir()))
+        # el visor integrado: la secuencia con sus fotogramas, y la carpeta de imágenes sacadas
+        from konvi.ui.seqview import Player
+        self.w._view_source(seq)
+        self.w._view_output(video)
+        players = self.w.findChildren(Player)
+        self.assertEqual(len(players), 2)
+        self.assertTrue(wait_until(lambda: [len(p.paths) for p in players] == [24, 25]))
+        self.assertEqual(players[0].fps, 12.0)
+        for p in players:
+            p.close()
+            p.cache.wait()
 
     def test_nunca_sobrescribe(self):
         (self.out / "corto.mp4").write_bytes(b"de antes")

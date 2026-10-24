@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3d8ff0"/>
+      <stop offset="1" stop-color="#6a4ce0"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="9" width="42" height="30" rx="5" fill="url(#g)"/>
+  <!-- perforaciones -->
+  <g fill="#ffffff" fill-opacity="0.55">
+    <rect x="7" y="11.5" width="4" height="3" rx="1"/>
+    <rect x="15" y="11.5" width="4" height="3" rx="1"/>
+    <rect x="23" y="11.5" width="4" height="3" rx="1"/>
+    <rect x="31" y="11.5" width="4" height="3" rx="1"/>
+    <rect x="39" y="11.5" width="3" height="3" rx="1"/>
+    <rect x="7" y="33.5" width="4" height="3" rx="1"/>
+    <rect x="15" y="33.5" width="4" height="3" rx="1"/>
+    <rect x="23" y="33.5" width="4" height="3" rx="1"/>
+    <rect x="31" y="33.5" width="4" height="3" rx="1"/>
+    <rect x="39" y="33.5" width="3" height="3" rx="1"/>
+  </g>
+  <path d="M 20.5 18.5 L 29.5 24 L 20.5 29.5 Z" fill="#ffffff" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>

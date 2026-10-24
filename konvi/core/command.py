@@ -40,6 +40,17 @@ FASTSTART = {"mp4", "mov", "m4a"}
 NEEDS_EVEN = {"h264", "h265", "av1", "vp9", "mpeg2", "dnxhr", "prores"}
 MPEG2_RATES = (24000 / 1001, 24, 25, 30000 / 1001, 30, 50, 60000 / 1001, 60)
 TEXT_SUBS_TO_SRT = {"mov_text"}       # MKV no admite mov_text: se pasa a SRT
+# Los EXR (los renders de Blender) guardan la luz en lineal y ffmpeg no la convierte: sin
+# esto, un gris medio sale a 55 en vez de a 128 y todo se ve oscuro. Es la sRGB estándar,
+# no la vista AgX/Filmic de Blender: para el aspecto exacto del render, mejor PNG.
+# zscale se queda en RGB flotante: si tuviera que sacar YUV, no sabe con qué matriz.
+LINEAR_TO_SRGB = "zscale=transferin=linear:transfer=iec61966-2-1,format={pix}"
+LINEAR_CODECS = {"exr"}
+ALPHA_PIX = ("rgba", "bgra", "argb", "abgr", "yuva", "gbrap", "ya", "rgba64", "bgra64")
+
+
+def linear_to_srgb(v):
+    return LINEAR_TO_SRGB.format(pix="gbrapf32le" if v.pix_fmt.startswith(ALPHA_PIX) else "gbrpf32le")
 
 
 class ConvertError(Exception):
@@ -70,6 +81,9 @@ NO_HARDWARE = Hardware()
 
 def check(info, preset):
     """Motivo por el que no se puede convertir, o None si se puede."""
+    if info.frames == 1:
+        return tr("Es una sola imagen. Para hacer un vídeo hace falta una secuencia "
+                  "(render_0001.png, render_0002.png…).")
     if not preset.is_audio_only and info.video is None:
         return tr("Este fichero no tiene imagen: elige un perfil de «Solo audio».")
     if preset.is_audio_only and not info.audio:
@@ -156,6 +170,8 @@ def _video_args(info, preset, hw_kind, hardware):
     else:
         kbps, cap, limit = 0, [], preset.max_height
 
+    if v.codec in LINEAR_CODECS:
+        vf.append(linear_to_srgb(v))
     if v.interlaced:
         vf.append("bwdif=mode=send_frame")
     if preset.profile != "dvd":
@@ -167,12 +183,16 @@ def _video_args(info, preset, hw_kind, hardware):
             vf.append("crop=trunc(iw/2)*2:trunc(ih/2)*2")
     fps = output_fps(info, preset)
     if fps and fps != v.fps:
-        vf.append(f"fps={fps:g}")
+        # al sacar imágenes, hacia arriba: un clip de menos de un segundo da su captura
+        vf.append(f"fps={fps:g}:round=up" if preset.is_image_sequence else f"fps={fps:g}")
     if codec == "mpeg2" and preset.profile != "dvd" and fps and \
             min(abs(fps - r) for r in MPEG2_RATES) > 0.01:
         # MPEG-2 solo admite las cadencias de la tele
         fps = min(MPEG2_RATES, key=lambda r: abs(r - fps))
         vf.append(f"fps={fps:.6g}")
+
+    if preset.is_image_sequence:
+        return _image_args(v, codec, preset, vf)
 
     pix = _pix_fmt(codec, v, hw_kind)
     if hw_kind == "vaapi":
@@ -235,6 +255,30 @@ def _video_args(info, preset, hw_kind, hardware):
     if vf:
         args = ["-vf", ",".join(vf)] + args
     return args
+
+
+def _image_args(v, codec, preset, vf):
+    """Un fichero por fotograma. PNG y TIFF conservan la transparencia y los 16 bits."""
+    alpha = v.pix_fmt.startswith(ALPHA_PIX)
+    deep = v.bit_depth > 8 or v.codec in LINEAR_CODECS
+    if codec == "png":
+        args = ["-c:v", "png", "-pix_fmt", ("rgba64be" if alpha else "rgb48be") if deep else
+                ("rgba" if alpha else "rgb24")]
+    elif codec == "tiff":
+        args = ["-c:v", "tiff", "-compression_algo", "deflate", "-pix_fmt",
+                ("rgba64le" if alpha else "rgb48le") if deep else ("rgba" if alpha else "rgb24")]
+    elif codec == "jpeg":
+        # JPEG no tiene transparencia; rango completo, como cualquier foto
+        args = ["-c:v", "mjpeg", "-q:v", str(preset.effective_quality()), "-pix_fmt", "yuvj444p"]
+    else:
+        raise ConvertError(tr("Códec de vídeo desconocido: {codec}", codec=codec))
+    return (["-vf", ",".join(vf)] if vf else []) + args
+
+
+def frame_digits(info, preset):
+    """Cifras del número de fotograma de la salida: 4 como Blender, más si no caben."""
+    frames = info.duration * (output_fps(info, preset) or 25) * 1.05 + 1
+    return max(4, len(str(int(frames))))
 
 
 def _audio_args(info, preset):
@@ -303,7 +347,7 @@ def build(info, preset, output, hardware=NO_HARDWARE, use_hardware=False):
             "-progress", "pipe:1", "-nostats"]
     if hw_kind == "vaapi":
         args += ["-vaapi_device", hardware.vaapi_device]
-    args += ["-i", str(info.path)]
+    args += [*info.input_options, "-i", str(info.path)]
 
     if preset.is_audio_only:
         args += ["-vn"]
@@ -315,6 +359,9 @@ def build(info, preset, output, hardware=NO_HARDWARE, use_hardware=False):
     args += ["-dn", "-map_metadata", "0", "-map_chapters", "0"]
     if preset.container in FASTSTART:
         args += ["-movflags", "+faststart"]
+    if preset.is_image_sequence:
+        # `output` es el patrón: carpeta/nombre_%04d.png
+        args += ["-f", "image2", "-start_number", "1"]
     args.append(str(output))
     return args
 

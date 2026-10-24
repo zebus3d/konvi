@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Service
-MimeType=video/*;audio/*;inode/directory;
+MimeType=video/*;audio/*;image/png;image/jpeg;image/x-exr;image/tiff;image/bmp;image/webp;image/x-tga;image/x-dpx;inode/directory;
 Actions=a80-konvi;
 X-KDE-Submenu=zebus3d
 Icon=folder-favorites

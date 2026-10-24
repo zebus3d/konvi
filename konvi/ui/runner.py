@@ -3,11 +3,12 @@
 import os
 import shutil
 import signal
+import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
-from ..core import command, naming
+from ..core import command, naming, probe
 from ..core.jobs import Status
 from ..core.progress import Progress
 from ..i18n import tr
@@ -18,6 +19,25 @@ def _error_text(stderr, code):
     lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
     useful = [ln for ln in lines if "Conversion failed" not in ln]
     return "\n".join(useful[-3:]) or tr("ffmpeg terminó con el código {code}.", code=code)
+
+
+def _discard(path):
+    """Borra el resultado a medias: un fichero o la carpeta de una secuencia de imágenes."""
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _size(path):
+    if path.is_dir():
+        return sum(f.stat().st_size for f in path.iterdir() if f.is_file())
+    return path.stat().st_size
+
+
+def output_extension(preset):
+    """Las secuencias de imágenes se guardan en una carpeta, sin extensión."""
+    return "" if preset.is_image_sequence else preset.container
 
 
 def hardware_fallback_message():
@@ -41,6 +61,7 @@ class Runner(QObject):
         self._stopping = False
         self._cancel = False
         self._tmp = None
+        self._links = None                # enlaces sin huecos de una secuencia (ver _input)
         self._progress = None
         self._stderr = ""
         self._done = self._failed = 0
@@ -72,11 +93,18 @@ class Runner(QObject):
 
     def _run(self, job, use_hw):
         taken = [j.output for j in self.jobs_provider() if j.output and j is not job]
-        final = naming.output_path(job.source, job.preset.container, self.output_folder, taken)
+        final = naming.output_path(job.source, output_extension(job.preset), self.output_folder, taken)
         tmp = naming.temp_path(final)
+        target = tmp
         try:
-            args = command.build(job.info, job.preset, tmp, self.hardware, use_hw)
-        except command.ConvertError as e:
+            if job.preset.is_image_sequence:
+                _discard(tmp)                 # de una vez anterior que se cortó
+                tmp.mkdir(parents=True)
+                target = naming.frame_pattern(tmp, final, job.preset.container,
+                                              command.frame_digits(job.info, job.preset))
+            args = command.build(self._input(job), job.preset, target, self.hardware, use_hw)
+        except (command.ConvertError, OSError) as e:
+            self._drop_links()
             job.status, job.message = Status.FAILED, str(e)
             self._failed += 1
             self.changed.emit(job.id)
@@ -104,6 +132,19 @@ class Runner(QObject):
         proc.start()
         self.changed.emit(job.id)
 
+    def _input(self, job):
+        """Lo que lee ffmpeg. Una secuencia con huecos se lee de enlaces numerados seguidos
+        (el %04d de ffmpeg se pararía en el primer hueco); se borran al terminar."""
+        if not (job.is_sequence and job.source.missing()):
+            return job.info
+        self._links = Path(tempfile.mkdtemp(prefix="konvi-frames-"))
+        return probe.linked_info(job.info, job.source, self._links)
+
+    def _drop_links(self):
+        if self._links:
+            shutil.rmtree(self._links, ignore_errors=True)
+            self._links = None
+
     def _on_stdout(self):
         if not self.proc:
             return
@@ -130,23 +171,25 @@ class Runner(QObject):
             return
         self.job = self.proc = None
         self.paused = False
+        self._drop_links()
         if proc:
             proc.deleteLater()
         self.logs[job.id] = self._stderr
 
         if self._cancel:
-            tmp.unlink(missing_ok=True)
+            _discard(tmp)
             job.status, job.output, job.fraction = Status.CANCELLED, None, 0.0
-        elif code == 0 and exit_status == QProcess.NormalExit and tmp.exists():
+        elif code == 0 and exit_status == QProcess.NormalExit and tmp.exists() and \
+                not (tmp.is_dir() and not any(tmp.iterdir())):
             final = job.output
             if final.exists():          # alguien creó ese nombre mientras tanto
-                final = naming.output_path(job.source, job.preset.container, final.parent)
+                final = naming.output_path(job.source, output_extension(job.preset), final.parent)
             tmp.replace(final)
-            job.output, job.output_size = final, final.stat().st_size
+            job.output, job.output_size = final, _size(final)
             job.status, job.fraction, job.eta = Status.DONE, 1.0, None
             self._done += 1
         else:
-            tmp.unlink(missing_ok=True)
+            _discard(tmp)
             if job.used_hardware and not self._stopping:
                 # Un driver que falla no debe dejar al usuario sin su vídeo
                 job.message = hardware_fallback_message()
@@ -218,3 +261,4 @@ def reveal(path):
         QProcess.startDetached("dolphin", ["--select", str(path)])
     else:
         open_path(path.parent)
+

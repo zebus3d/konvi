@@ -11,10 +11,11 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from konvi.core import command, encoders, presets, probe
+from konvi.core import command, encoders, naming, presets, probe, sequence
 
 EXPECTED_VIDEO = {"h264": "h264", "h265": "hevc", "av1": "av1", "vp9": "vp9", "prores": "prores",
-                  "dnxhr": "dnxhd", "ffv1": "ffv1", "mpeg2": "mpeg2video"}
+                  "dnxhr": "dnxhd", "ffv1": "ffv1", "mpeg2": "mpeg2video",
+                  "png": "png", "jpeg": "mjpeg", "tiff": "tiff"}
 EXPECTED_AUDIO = {"aac": "aac", "opus": "opus", "mp3": "mp3", "flac": "flac", "pcm": "pcm_s24le",
                   "ac3": "ac3", "mp2": "mp2"}
 
@@ -59,6 +60,22 @@ class RealConversions(unittest.TestCase):
         # solo audio
         ff(*lavfi_v, "sine=duration=2", "-c:a", "libmp3lame", str(d / "audio.mp3"))
         cls.infos = {p.stem: probe.probe(p) for p in d.iterdir() if p.suffix != ".srt"}
+        # secuencias de imágenes, como las de un render de Blender
+        (d / "png").mkdir()
+        ff(*lavfi_v, "testsrc2=size=321x241:rate=24:duration=1", "-start_number", "1",
+           str(d / "png" / "render_%04d.png"))
+        (d / "exr").mkdir()       # lineal y con transparencia; un gris de 0,2157 en lineal
+        ff(*lavfi_v, "color=c=0x373737:size=320x240:rate=24:duration=0.5,format=rgba", "-c:v", "exr",
+           "-pix_fmt", "gbrapf32le", "-start_number", "1", str(d / "exr" / "%04d.exr"))
+        gaps = d / "con huecos [1] 100%"      # caracteres que ffmpeg interpreta
+        gaps.mkdir()
+        ff(*lavfi_v, "testsrc2=size=320x240:rate=24:duration=0.5", "-start_number", "1",
+           str(gaps).replace("%", "%%") + "/a%%b_%03d.jpg")
+        for n in (5, 6):
+            (gaps / f"a%b_{n:03d}.jpg").unlink()
+        cls.sequences = {s.folder.name: s for s in sequence.find(
+            f for f in d.rglob("*") if f.is_file())}
+        cls.infos.update({name: probe.probe_sequence(s, 24) for name, s in cls.sequences.items()})
 
     @classmethod
     def tearDownClass(cls):
@@ -68,9 +85,27 @@ class RealConversions(unittest.TestCase):
         info = self.infos[source]
         out = self.dir / "out" / f"{source}-{preset.id}{'-hw' if use_hw else ''}.{preset.container}"
         out.parent.mkdir(exist_ok=True)
-        args = command.build(info, preset, out, hardware, use_hw)
+        target = out
+        if preset.is_image_sequence:
+            shutil.rmtree(out, ignore_errors=True)
+            out.mkdir()
+            target = naming.frame_pattern(out, out, preset.container, command.frame_digits(info, preset))
+        seq = self.sequences.get(source)
+        if seq and seq.missing():             # como el ejecutor: enlaces sin huecos
+            info = probe.linked_info(info, seq, Path(tempfile.mkdtemp(dir=self.dir)))
+        args = command.build(info, preset, target, hardware, use_hw)
         r = subprocess.run(args, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, f"{preset.id} con {source}:\n{' '.join(args)}\n{r.stderr[-800:]}")
+        if preset.is_image_sequence:
+            frames = sorted(out.iterdir())
+            self.assertTrue(frames, preset.id)
+            self.assertEqual(frames[0].name, f"{out.name}_0001.{preset.container}")
+            data = streams(frames[0])
+            self.assertEqual(data["streams"][0]["codec_name"], EXPECTED_VIDEO[preset.video], preset.id)
+            if not preset.max_fps:
+                expected = info.duration * info.video.fps       # la duración incluye el audio
+                self.assertAlmostEqual(len(frames), expected, delta=expected * 0.05 + 1, msg=preset.id)
+            return data, {"video": data["streams"]}
         data = streams(out)
         kinds = {}
         for s in data["streams"]:
@@ -170,6 +205,37 @@ class RealConversions(unittest.TestCase):
                     ["ffmpeg", "-v", "error", "-i", str(f), "-frames:v", "1", "-f", "rawvideo",
                      "-pix_fmt", pix, "-"], capture_output=True, check=True).stdout
                 self.assertEqual(frame(out), frame(self.dir / path), source)
+
+    def test_secuencias_de_imagenes_a_video_y_a_imagenes(self):
+        for source in self.sequences:
+            for p in presets.BUILTIN:
+                if p.video:
+                    with self.subTest(f"{source}/{p.id}"):
+                        self.convert(source, p)
+
+    def test_secuencia_dura_lo_que_toca_y_se_salta_los_huecos(self):
+        s = self.sequences["png"]
+        self.infos["png25"] = probe.probe_sequence(s, 25)
+        data, _ = self.convert("png25", presets.builtin_by_id()["mp4_h264"])
+        self.assertAlmostEqual(float(data["format"]["duration"]), 24 / 25, delta=0.05)
+        self.assertIn("5-6", self.infos["con huecos [1] 100%"].warning)
+        _, kinds = self.convert("con huecos [1] 100%", presets.builtin_by_id()["img_png"])
+        out = self.dir / "out" / "con huecos [1] 100%-img_png.png"
+        self.assertEqual(len(list(out.iterdir())), 10)       # los 12 menos los 2 que faltan
+
+    def test_exr_lineal_se_ve_en_srgb(self):
+        p = presets.builtin_by_id()["img_png"]
+        self.convert("exr", p)
+        first = self.dir / "out" / f"exr-{p.id}.png" / f"exr-{p.id}.png_0001.png"
+        rgb = subprocess.run(["ffmpeg", "-v", "error", "-i", str(first), "-f", "rawvideo",
+                              "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+        self.assertAlmostEqual(rgb[0], 128, delta=2)        # sin convertir saldría 55
+
+    def test_video_a_imagenes_conserva_los_10_bits(self):
+        _, kinds = self.convert("diez_bits", presets.builtin_by_id()["img_tiff"])
+        self.assertEqual(kinds["video"][0]["codec_name"], "tiff")
+        out = sorted((self.dir / "out" / "diez_bits-img_tiff.tif").iterdir())[0]
+        self.assertEqual(probe.probe(out).video.pix_fmt, "rgb48le")
 
     def test_tarjeta_grafica(self):
         hw = encoders.detect()

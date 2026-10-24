@@ -10,6 +10,8 @@ from pathlib import Path
 
 # Códecs de vídeo que entiende command.py
 VIDEO_CODECS = ("h264", "h265", "av1", "vp9", "prores", "dnxhr", "ffv1", "mpeg2")
+# Códecs de imagen: el resultado es una carpeta con un fichero por fotograma
+IMAGE_CODECS = ("png", "jpeg", "tiff")
 AUDIO_CODECS = ("aac", "opus", "mp3", "flac", "pcm", "ac3", "mp2", "copy")
 
 # Calidad de "Máxima" a "Baja" para cada códec que trabaja con calidad constante
@@ -20,6 +22,7 @@ QUALITY_STEPS = {
     "av1": (22, 26, 30, 35, 40),
     "vp9": (24, 28, 32, 36, 40),
     "mpeg2": (2, 3, 4, 6, 8),
+    "jpeg": (1, 2, 3, 5, 8),
 }
 QUALITY_NAMES = ("Máxima", "Muy alta", "Alta", "Media", "Baja")
 
@@ -53,6 +56,10 @@ class Preset:
     def is_audio_only(self):
         return self.video is None
 
+    @property
+    def is_image_sequence(self):
+        return self.video in IMAGE_CODECS
+
     def effective_quality(self):
         if self.lossless:
             return 0
@@ -66,31 +73,34 @@ class Preset:
 class Category:
     id: str
     label: str
-    icon: str          # nombre de icono del tema (Breeze)
+    icon: str          # konvi/icons/<icon>.svg
     tooltip: str
 
 
 CATEGORIES = (  # por orden de uso: lo de todos los días primero
-    Category("mp4", "MP4", "video-mp4",
+    Category("mp4", "MP4", "mp4",
              "MP4: el formato que abre todo\n(móviles, teles, navegadores, Windows, Mac)."),
-    Category("web", "Web y redes", "internet-web-browser",
+    Category("web", "Web y redes", "web",
              "YouTube, Vimeo, WhatsApp, Discord, correo..."),
-    Category("device", "Móvil y TV", "smartphone",
+    Category("device", "Móvil y TV", "device",
              "Para verlo en el móvil, la tablet o la tele."),
-    Category("audio", "Solo audio", "audio-x-generic",
+    Category("audio", "Solo audio", "audio",
              "Saca solo el sonido: MP3, M4A, Opus, FLAC o WAV."),
-    Category("edit", "Edición", "applications-multimedia",
+    Category("edit", "Edición", "edit",
              "Para editar en DaVinci Resolve, Premiere o Final Cut:\n"
              "códecs intermedios (DNxHR, ProRes) que van fluidos en la línea de tiempo.\n"
              "Ficheros muy grandes."),
-    Category("mkv", "MKV", "video-x-matroska",
+    Category("images", "Imágenes", "images",
+             "Saca los fotogramas del vídeo como imágenes (PNG, JPEG o TIFF),\n"
+             "cada vídeo en su propia carpeta."),
+    Category("mkv", "MKV", "mkv",
              "MKV (Matroska): guarda todas las pistas de audio y los subtítulos.\n"
              "Ideal para películas y series."),
-    Category("webm", "WebM", "video-webm",
+    Category("webm", "WebM", "webm",
              "WebM: vídeo para páginas web (VP9 o AV1, audio Opus)."),
-    Category("mpeg", "MPEG / DVD", "media-optical-dvd",
+    Category("mpeg", "MPEG / DVD", "mpeg",
              "MPEG-2: reproductores antiguos y DVD."),
-    Category("custom", "Mis perfiles", "bookmarks",
+    Category("custom", "Mis perfiles", "custom",
              "Los perfiles que has guardado desde «Personalizar…»."),
 )
 
@@ -152,6 +162,20 @@ BUILTIN = (
        video="prores", profile="hq", audio="pcm"),
     _p("edit_prores_proxy", "edit", "ProRes Proxy",
        "ProRes ligero para editar con proxies.", "mov", video="prores", profile="proxy", audio="pcm"),
+    # --- Imágenes
+    _p("img_png", "images", "PNG · todos los fotogramas",
+       "Cada fotograma como una imagen PNG, sin pérdida, en una carpeta con el nombre\n"
+       "del vídeo. Para Blender, para retocar fotogramas o para un juego.", "png",
+       video="png", audio=None),
+    _p("img_jpeg", "images", "JPEG · todos los fotogramas",
+       "Cada fotograma como una imagen JPEG: ocupa mucho menos que PNG.", "jpg",
+       video="jpeg", audio=None),
+    _p("img_tiff", "images", "TIFF · todos los fotogramas",
+       "Sin pérdida y en 16 bits si el original tiene más de 8: para GIMP, Krita,\n"
+       "Photoshop o composición.", "tif", video="tiff", audio=None),
+    _p("img_jpeg_1s", "images", "JPEG · una imagen por segundo",
+       "Una captura de cada segundo del vídeo: para elegir la mejor o ver de un\n"
+       "vistazo lo que tiene.", "jpg", video="jpeg", audio=None, max_fps=1.0),
     # --- MPEG
     _p("mpeg_mpeg2", "mpeg", "MPEG-2 · misma resolución",
        "Para reproductores y programas antiguos.", "mpg", video="mpeg2", audio="mp2", audio_kbps=224),

@@ -5,7 +5,7 @@ from enum import Enum
 from itertools import count
 from pathlib import Path
 
-from . import command
+from . import command, probe, sequence
 from .naming import TMP_TAG
 
 
@@ -36,7 +36,7 @@ _ids = count(1)
 
 @dataclass
 class Job:
-    source: Path
+    source: Path                # o una sequence.Sequence
     preset: object
     id: int = field(default_factory=lambda: next(_ids))
     info: object = None
@@ -48,6 +48,16 @@ class Job:
     output: Path | None = None
     output_size: int = 0
     used_hardware: bool = False
+
+    @property
+    def is_sequence(self):
+        return isinstance(self.source, sequence.Sequence)
+
+    def set_fps(self, fps):
+        """Cadencia de una secuencia de imágenes (no la tienen: la elige el usuario)."""
+        if self.is_sequence and self.info and self.status in EDITABLE:
+            self.info = probe.sequence_info(self.source, self.info, fps)
+            self.revalidate()
 
     def set_probed(self, info, error=""):
         if error:
@@ -62,9 +72,11 @@ class Job:
             self.revalidate()
 
     def revalidate(self):
-        problem = command.check(self.info, self.preset) if self.info else None
+        if self.info is None:
+            return
+        problem = command.check(self.info, self.preset)
         self.status = Status.INVALID if problem else Status.READY
-        self.message = problem or ""
+        self.message = problem or self.info.warning
         self.fraction, self.eta, self.speed = 0.0, None, 0.0
 
     def reset(self):
@@ -75,13 +87,15 @@ class Job:
 
 
 def expand_paths(paths):
-    """Ficheros tal cual; de las carpetas, los vídeos y audios que haya dentro (recursivo)."""
-    out = []
+    """Ficheros tal cual; de las carpetas, los vídeos y audios que haya dentro (recursivo) y
+    sus secuencias de imágenes. Las imágenes sueltas se agrupan en secuencias."""
+    out, images = [], []
     for p in map(Path, paths):
         if p.is_dir():
-            out += sorted(f for f in p.rglob("*")
-                          if f.is_file() and f.suffix[1:].lower() in MEDIA_EXTENSIONS
-                          and TMP_TAG not in f.name)
+            files = sorted(f for f in p.rglob("*") if f.is_file()
+                           and not any(TMP_TAG in part for part in f.relative_to(p).parts))
+            out += [f for f in files if f.suffix[1:].lower() in MEDIA_EXTENSIONS]
+            out += sequence.find(files)
         elif p.is_file():
-            out.append(p)
-    return out
+            (images if sequence.is_image(p) else out).append(p)
+    return out + sequence.from_selection(images)

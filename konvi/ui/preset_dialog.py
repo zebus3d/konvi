@@ -15,6 +15,8 @@ RESOLUTIONS = (("Como el original", None), ("4K · 2160p", 2160), ("1440p", 1440
                ("1080p (Full HD)", 1080), ("720p (HD)", 720), ("480p", 480), ("360p", 360))
 FPS = (("Como el original", None), ("60", 60.0), ("50", 50.0), ("30", 30.0), ("25", 25.0),
        ("24", 24.0))
+# al sacar imágenes, además: pocas por segundo (capturas)
+IMAGE_FPS = (("Una imagen por segundo", 1.0), ("Una imagen cada 10 segundos", 0.1))
 SPEEDS = (("Rápida (el fichero sale algo más grande)", "fast"), ("Equilibrada", "medium"),
           ("Lenta (el fichero sale más pequeño)", "slow"))
 AUDIO_KBPS = (96, 128, 160, 192, 256, 320, 384)
@@ -108,7 +110,8 @@ class PresetDialog(QDialog):
         (self.by_size if preset.target_mb else self.by_quality).setChecked(True)
         self.by_quality.toggled.connect(self._sync)
         if not variable_quality:
-            why = (tr("Es sin pérdida: la calidad es siempre la del original.") if preset.lossless or video == "ffv1"
+            why = (tr("Es sin pérdida: la calidad es siempre la del original.")
+                   if preset.lossless or video in ("ffv1", "png", "tiff")
                    else tr("Este formato tiene calidad fija.") if video else "")
             for w in (self.by_quality, self.slider, self.by_size, self.size_mb):
                 w.setEnabled(False)
@@ -128,7 +131,7 @@ class PresetDialog(QDialog):
         self.resolution.setToolTip(tr("Solo reduce: si el original es más pequeño, se deja como está.\n"
                                       "En vídeos verticales se refiere al lado corto."))
         self.fps = QComboBox()
-        for text, value in FPS:
+        for text, value in FPS + (IMAGE_FPS if preset.is_image_sequence else ()):
             self.fps.addItem(tr(text), value)
         _select(self.fps, float(preset.max_fps) if preset.max_fps else None)
         self.fps.setToolTip(tr("Máximo de fotogramas por segundo. Si el original tiene menos,\n"

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f1f4f8"/>
+      <stop offset="1" stop-color="#aab5c4"/>
+    </linearGradient>
+  </defs>
+  <circle cx="24" cy="24" r="20" fill="url(#g)" stroke="#7d8898" stroke-width="1.5"/>
+  <!-- brillos irisados -->
+  <path d="M 24 24 L 9.9 9.9 A 19.5 19.5 0 0 1 21 4.7 Z" fill="#d07be0" fill-opacity="0.45"/>
+  <path d="M 24 24 L 21 4.7 A 19.5 19.5 0 0 1 31 5.3 Z" fill="#4fc3f7" fill-opacity="0.4"/>
+  <path d="M 24 24 L 38.1 38.1 A 19.5 19.5 0 0 1 27 43.3 Z" fill="#ffd54f" fill-opacity="0.5"/>
+  <path d="M 24 24 L 27 43.3 A 19.5 19.5 0 0 1 17 42.7 Z" fill="#9b59b6" fill-opacity="0.35"/>
+  <circle cx="24" cy="24" r="8" fill="#ffffff" stroke="#9aa5b4" stroke-width="1"/>
+  <circle cx="24" cy="24" r="3.2" fill="#6e7781"/>
+</svg>

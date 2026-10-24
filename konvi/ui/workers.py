@@ -9,7 +9,8 @@ import subprocess
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtGui import QImage
 
-from ..core import encoders, probe
+from ..core import command, encoders, probe
+from ..core.sequence import Sequence
 from ..i18n import tr
 
 
@@ -28,11 +29,12 @@ class _Task(QRunnable):
         self.fn()
 
 
-def _grab_frame(path, seconds, height=108):
+def _grab_frame(path, seconds, height=108, pre=""):
+    vf = ",".join(filter(None, [pre, f"scale=-2:{height}"]))
     try:
         out = subprocess.run(
             ["ffmpeg", "-v", "error", "-nostdin", "-ss", f"{seconds:.2f}", "-i", str(path),
-             "-frames:v", "1", "-vf", f"scale=-2:{height}", "-f", "image2pipe", "-c:v", "png", "-"],
+             "-frames:v", "1", "-vf", vf, "-f", "image2pipe", "-c:v", "png", "-"],
             capture_output=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return QImage()
@@ -55,10 +57,14 @@ class Workers(QObject):
         self._bridge.thumbnail.connect(self.thumbnail, Qt.QueuedConnection)
         self._bridge.hardware.connect(self.hardware_ready, Qt.QueuedConnection)
 
-    def probe(self, job_id, path):
+    def probe(self, job_id, path, fps):
+        """`fps` solo cuenta para las secuencias de imágenes, que no lo traen."""
         def work():
             try:
-                info, error = probe.probe(path), ""
+                if isinstance(path, Sequence):
+                    info, error = probe.probe_sequence(path, fps), ""
+                else:
+                    info, error = probe.probe(path), ""
             except probe.ProbeError as e:
                 info, error = None, str(e)
             except Exception as e:      # un fichero raro no puede tumbar la app
@@ -68,6 +74,14 @@ class Workers(QObject):
 
     def thumbnail_for(self, job_id, info):
         if info.video is None:
+            return
+        if info.preview:            # secuencia: un fotograma de verdad, no el patrón
+            pre = command.linear_to_srgb(info.video) if info.video.codec in command.LINEAR_CODECS else ""
+            def work():
+                image = _grab_frame(info.preview, 0, pre=pre)
+                if not image.isNull():
+                    self._bridge.thumbnail.emit(job_id, image)
+            self.pool.start(_Task(work))
             return
         def work():
             image = _grab_frame(info.path, info.duration * 0.1 if info.duration > 1 else 0)

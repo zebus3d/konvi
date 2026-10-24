@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fd3f7"/>
+      <stop offset="1" stop-color="#d4f1fb"/>
+    </linearGradient>
+  </defs>
+  <!-- fotogramas de atrás -->
+  <rect x="3" y="5" width="30" height="22" rx="3" fill="#a5d6a7" stroke="#2e8b57" stroke-width="1.5"/>
+  <rect x="9" y="11" width="30" height="22" rx="3" fill="#c8e6c9" stroke="#2e8b57" stroke-width="1.5"/>
+  <!-- fotograma delante -->
+  <rect x="15" y="17" width="30" height="24" rx="3" fill="#ffffff" stroke="#27ae60" stroke-width="1.5"/>
+  <rect x="18" y="20" width="24" height="18" rx="1.5" fill="url(#sky)"/>
+  <circle cx="36.5" cy="24.5" r="2.5" fill="#fdbc4b"/>
+  <path d="M 18 38 L 18 34 L 24.5 27 L 29.5 32 L 32.5 29 L 42 36 L 42 38 Z" fill="#27ae60"/>
+</svg>

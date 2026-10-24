@@ -15,9 +15,11 @@ from ..core import naming, presets
 from ..core.jobs import ACTIVE, EDITABLE, FINISHED, MEDIA_EXTENSIONS, Job, Status, expand_paths
 from ..core.probe import format_duration
 from ..core.progress import format_eta
+from ..core.sequence import DEFAULT_FPS, IMAGE_EXTENSIONS, SEQUENCE_FPS
 from ..i18n import number, tr
 from .preset_dialog import PresetDialog
-from .runner import Runner, open_path, reveal
+from .runner import Runner, open_path, output_extension, reveal
+from .seqview import Player
 from .workers import Workers
 
 COL_FILE, COL_PRESET, COL_STATUS = range(3)
@@ -31,8 +33,12 @@ def human_size(n):
         n /= 1024
 
 
-def icon(name, fallback="video-x-generic"):
-    return QIcon.fromTheme(name, QIcon.fromTheme(fallback))
+ICONS = Path(__file__).resolve().parent.parent / "icons"
+
+
+def icon(name):
+    """Iconos propios (konvi/icons): la app se ve igual en Plasma, GNOME o donde sea."""
+    return QIcon(str(ICONS / f"{name}.svg"))
 
 
 def videos(n):
@@ -43,7 +49,7 @@ class MainWindow(QMainWindow):
     def __init__(self, files=(), settings=None, config_dir=None):
         super().__init__()
         self.setWindowTitle("Konvi")
-        self.setWindowIcon(QIcon.fromTheme("konvi", icon("video-x-generic")))
+        self.setWindowIcon(QIcon.fromTheme("konvi", QIcon(str(ICONS.parent.parent / "data" / "konvi.svg"))))
         self.setAcceptDrops(True)
         self.settings = settings or QSettings("konvi", "konvi")
         self.config_dir = Path(config_dir or Path(QStandardPaths.writableLocation(
@@ -92,12 +98,12 @@ class MainWindow(QMainWindow):
             b = QToolButton()
             b.setText(tr(cat.label).replace("&", "&&"))     # en un botón, & marca un atajo
             b.setIcon(icon(cat.icon))
-            b.setIconSize(QSize(40, 40))
+            b.setIconSize(QSize(52, 52))
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
             b.setCheckable(True)
             b.setAutoRaise(True)
             b.setMinimumWidth(92)
-            b.setMinimumHeight(76)
+            b.setMinimumHeight(88)
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)   # entre todos llenan el ancho
             b.setToolTip(tr(cat.tooltip))
             b.clicked.connect(lambda _=False, c=cat.id: self._category_clicked(c))
@@ -119,13 +125,13 @@ class MainWindow(QMainWindow):
                                         "de la lista verás para qué sirve."))
         self.preset_combo.activated.connect(self._preset_activated)
         row.addWidget(self.preset_combo, 1)
-        self.btn_settings = QPushButton(icon("configure"), tr("Personalizar…"))
+        self.btn_settings = QPushButton(icon("settings"), tr("Personalizar…"))
         self.btn_settings.setToolTip(tr("Cambiar la calidad, el tamaño final, la resolución o el sonido\n"
                                         "de este perfil y guardarlo en «Mis perfiles» para la próxima vez."))
         self.btn_settings.clicked.connect(self._edit_preset)
         row.addWidget(self.btn_settings)
         self.btn_delete_preset = QToolButton()
-        self.btn_delete_preset.setIcon(icon("edit-delete"))
+        self.btn_delete_preset.setIcon(icon("delete"))
         self.btn_delete_preset.setToolTip(tr("Borrar este perfil de «Mis perfiles»"))
         self.btn_delete_preset.setAccessibleName(tr("Borrar perfil"))
         self.btn_delete_preset.clicked.connect(self._delete_preset)
@@ -143,13 +149,34 @@ class MainWindow(QMainWindow):
         self.hw_check.toggled.connect(self._hw_toggled)
         root.addWidget(self.hw_check)
 
+        # cadencia de las secuencias de imágenes (solo se ve si hay alguna en la lista)
+        self.fps_row = QWidget()
+        fr = QHBoxLayout(self.fps_row)
+        fr.setContentsMargins(0, 0, 0, 0)
+        fps_tip = tr("Las secuencias de imágenes no dicen a qué velocidad van: elige a cuántos\n"
+                     "fotogramas por segundo se convierten. Blender usa 24 de serie.")
+        fps_label = QLabel(tr("Secuencias de imágenes a:"))
+        fps_label.setToolTip(fps_tip)
+        fr.addWidget(fps_label)
+        self.fps_combo = QComboBox()
+        for fps in SEQUENCE_FPS:
+            self.fps_combo.addItem(tr("{fps} fps", fps=number(fps, 3).rstrip("0").rstrip(",.")), fps)
+        self.fps_combo.setToolTip(fps_tip)
+        fps_label.setBuddy(self.fps_combo)
+        i = self.fps_combo.findData(float(self.settings.value("sequence_fps", DEFAULT_FPS)))
+        self.fps_combo.setCurrentIndex(i if i >= 0 else self.fps_combo.findData(DEFAULT_FPS))
+        self.fps_combo.activated.connect(self._fps_activated)
+        fr.addWidget(self.fps_combo)
+        fr.addStretch(1)
+        root.addWidget(self.fps_row)
+
         # acciones de la lista
         tools = QHBoxLayout()
-        self.btn_add = QPushButton(icon("list-add"), tr("Añadir vídeos…"))
+        self.btn_add = QPushButton(icon("add"), tr("Añadir vídeos…"))
         self.btn_add.setToolTip(tr("Elegir vídeos o audios para convertir (Ctrl+O).\n"
                                    "También puedes arrastrarlos a la ventana, o una carpeta entera."))
         self.btn_add.clicked.connect(self._ask_files)
-        self.btn_remove = QPushButton(icon("list-remove"), tr("Quitar"))
+        self.btn_remove = QPushButton(icon("remove"), tr("Quitar"))
         self.btn_remove.clicked.connect(self.remove_selected)
         for b in (self.btn_add, self.btn_remove):
             tools.addWidget(b)
@@ -161,9 +188,9 @@ class MainWindow(QMainWindow):
         empty = QWidget()
         ev = QVBoxLayout(empty)
         ev.addStretch(1)
-        drop_tip = tr("Suelta aquí vídeos, audios o carpetas enteras.")
+        drop_tip = tr("Suelta aquí vídeos, audios, secuencias de imágenes o carpetas enteras.")
         art = QLabel()
-        art.setPixmap(icon("video-x-generic").pixmap(96, 96))
+        art.setPixmap(icon("video").pixmap(96, 96))
         art.setAlignment(Qt.AlignCenter)
         art.setToolTip(drop_tip)
         title = QLabel(tr("Arrastra aquí tus vídeos"))
@@ -176,7 +203,8 @@ class MainWindow(QMainWindow):
         hint.setAlignment(Qt.AlignCenter)
         hint.setEnabled(False)
         hint.setToolTip(tr("De una carpeta se añaden todos los vídeos y audios que haya dentro,\n"
-                           "también los de sus subcarpetas."))
+                           "también los de sus subcarpetas, y cada secuencia de imágenes\n"
+                           "(render_0001.png, render_0002.png…) como si fuera un vídeo."))
         for w in (art, title, hint):
             ev.addWidget(w)
         ev.addStretch(1)
@@ -220,15 +248,18 @@ class MainWindow(QMainWindow):
         self._fill_out_combo(self.settings.value("out_folder", "") or "")
         self.out_combo.activated.connect(self._out_activated)
         bottom.addWidget(self.out_combo)
-        self.btn_open_folder = QPushButton(icon("document-open-folder", "folder"), tr("Abrir carpeta"))
+        self.btn_open_folder = QPushButton(icon("folder-open"), tr("Abrir carpeta"))
         self.btn_open_folder.setToolTip(tr("Abrir la carpeta con los vídeos que se acaban de convertir."))
         self.btn_open_folder.clicked.connect(self._open_output_folder)
         bottom.addWidget(self.btn_open_folder)
-        bottom.addStretch(1)
         self.overall_label = QLabel()
+        # ocupa el hueco que quede sin exigir ancho: si no, la ventana crece cada vez que
+        # «quedan unos…» se alarga, y no vuelve a encoger
+        self.overall_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.overall_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.overall_label.setToolTip(tr("Resumen de la lista: cuántos vídeos hay y cuánto duran en total,\n"
                                          "o cómo va la conversión."))
-        bottom.addWidget(self.overall_label)
+        bottom.addWidget(self.overall_label, 1)
         self.overall_bar = QProgressBar()
         self.overall_bar.setFixedWidth(200)
         self.overall_bar.setRange(0, 1000)
@@ -236,14 +267,14 @@ class MainWindow(QMainWindow):
         self.overall_bar.setToolTip(tr("Progreso de todos los vídeos de esta tanda."))
         self.overall_bar.hide()
         bottom.addWidget(self.overall_bar)
-        self.btn_pause = QPushButton(icon("media-playback-pause"), tr("Pausa"))
+        self.btn_pause = QPushButton(icon("pause"), tr("Pausa"))
         self.btn_pause.setToolTip(tr("Pausar la conversión (se puede seguir después)"))
         self.btn_pause.clicked.connect(self._toggle_pause)
-        self.btn_stop = QPushButton(icon("media-playback-stop"), tr("Detener"))
+        self.btn_stop = QPushButton(icon("stop"), tr("Detener"))
         self.btn_stop.setToolTip(tr("Parar la conversión. El vídeo que se estaba convirtiendo\n"
                                     "se descarta; los ya terminados se quedan."))
         self.btn_stop.clicked.connect(self._stop)
-        self.btn_convert = QPushButton(icon("media-playback-start"), tr("Convertir"))
+        self.btn_convert = QPushButton(icon("play"), tr("Convertir"))
         self.btn_convert.setDefault(True)
         self.btn_convert.setMinimumHeight(36)
         self.btn_convert.setMinimumWidth(140)
@@ -386,14 +417,29 @@ class MainWindow(QMainWindow):
     def _hw_toggled(self, on):
         self.runner.use_hardware = on
 
+    # ------------------------------------------------------------------ secuencias de imágenes
+
+    @property
+    def sequence_fps(self):
+        return self.fps_combo.currentData()
+
+    def _fps_activated(self, _index):
+        self.settings.setValue("sequence_fps", self.sequence_fps)
+        self._batch_message = ""
+        for job in self.jobs:
+            if job.is_sequence:
+                job.set_fps(self.sequence_fps)
+                self._update_item(job)
+        self._refresh()
+
     # ------------------------------------------------------------------ carpeta de salida
 
     def _fill_out_combo(self, current):
         self.out_combo.clear()
-        self.out_combo.addItem(icon("document-open-folder", "folder"), tr("Junto al original"), "")
+        self.out_combo.addItem(icon("folder-open"), tr("Junto al original"), "")
         for folder in self._recent_folders()[:5]:
             self.out_combo.addItem(icon("folder"), folder, folder)
-        self.out_combo.addItem(icon("folder-new", "folder"), tr("Elegir carpeta…"), CHOOSE_FOLDER)
+        self.out_combo.addItem(icon("folder-new"), tr("Elegir carpeta…"), CHOOSE_FOLDER)
         i = self.out_combo.findData(current)
         self.out_combo.setCurrentIndex(max(i, 0))
         self.runner.output_folder = current or None
@@ -430,11 +476,11 @@ class MainWindow(QMainWindow):
             self.jobs.append(job)
             item = QTreeWidgetItem()
             item.setData(0, Qt.UserRole, job.id)
-            item.setIcon(COL_FILE, icon("video-x-generic"))
+            item.setIcon(COL_FILE, icon("image-sequence") if job.is_sequence else icon("video"))
             self.items[job.id] = item
             self.tree.addTopLevelItem(item)
             self._update_item(job)
-            self.workers.probe(job.id, path)
+            self.workers.probe(job.id, path, self.sequence_fps)
             added += 1
         self._refresh()
         return added
@@ -450,7 +496,7 @@ class MainWindow(QMainWindow):
         if info is not None:
             self.workers.thumbnail_for(job_id, info)
             if info.video is None:
-                self.items[job_id].setIcon(COL_FILE, icon("audio-x-generic"))
+                self.items[job_id].setIcon(COL_FILE, icon("audio-file"))
         self._update_item(job)
         self._refresh()
 
@@ -496,8 +542,10 @@ class MainWindow(QMainWindow):
             return tr("Leyendo…"), ""
         if s == Status.READY:
             taken = [j.output for j in self.jobs if j.output and j is not job]
-            where = naming.output_path(job.source, job.preset.container, self.runner.output_folder, taken)
-            tip = tr("Se guardará como:\n{path}", path=where)
+            where = naming.output_path(job.source, output_extension(job.preset),
+                                       self.runner.output_folder, taken)
+            tip = (tr("Las imágenes se guardarán en la carpeta:\n{path}", path=where)
+                   if job.preset.is_image_sequence else tr("Se guardará como:\n{path}", path=where))
             text = tr("En cola") if self.runner.running else tr("Listo")
             return text, "\n\n".join(filter(None, [tip, job.message]))
         if s == Status.INVALID:
@@ -549,10 +597,10 @@ class MainWindow(QMainWindow):
 
     def _ask_files(self):
         start = self.settings.value("last_dir", str(Path.home()))
-        exts = " ".join(f"*.{e} *.{e.upper()}" for e in sorted(MEDIA_EXTENSIONS))
+        exts = " ".join(f"*.{e} *.{e.upper()}" for e in sorted(MEDIA_EXTENSIONS | IMAGE_EXTENSIONS))
         files, _ = QFileDialog.getOpenFileNames(
             self, tr("Añadir vídeos"), start,
-            tr("Vídeo y audio ({exts});;Todos los ficheros (*)", exts=exts))
+            tr("Vídeo, audio e imágenes ({exts});;Todos los ficheros (*)", exts=exts))
         if files:
             self.settings.setValue("last_dir", str(Path(files[0]).parent))
             self.add_files(files)
@@ -580,33 +628,64 @@ class MainWindow(QMainWindow):
     def _double_clicked(self, item, _column):
         job = self._job(item.data(0, Qt.UserRole))
         if job and job.status == Status.DONE and job.output and job.output.exists():
+            self._view_output(job)
+        elif job and job.is_sequence:
+            self._view_source(job)
+
+    def _view_output(self, job):
+        """El vídeo con el reproductor del sistema; una carpeta de fotogramas, con el visor."""
+        if job.output.is_dir():
+            fps = job.preset.max_fps if job.preset.max_fps else job.info.video.fps
+            self._play([job.output], fps, find=True)
+        else:
             open_path(job.output)
+
+    def _view_source(self, job):
+        if job.is_sequence:
+            seq = job.source
+            self._play([seq.frame_path(n) for n in seq.frames], self.sequence_fps)
+        else:
+            open_path(job.source)
+
+    def _play(self, paths, fps, find=False):
+        """Visor de secuencias (seqview) en su propia ventana."""
+        player = Player([] if find else paths, fps, autoplay=True, parent=self)
+        player.resize(960, 600)
+        player.show()
+        if find:
+            player.open_async([str(p) for p in paths])     # la secuencia de la carpeta, en un hilo
 
     def _context_menu(self, pos):
         item = self.tree.itemAt(pos)
         job = self._job(item.data(0, Qt.UserRole)) if item else None
         menu = QMenu(self)
         if job is None:
-            menu.addAction(icon("list-add"), tr("Añadir vídeos…"), self._ask_files)
-            clear = menu.addAction(icon("edit-clear-history"), tr("Quitar los terminados"), self._clear_finished)
+            menu.addAction(icon("add"), tr("Añadir vídeos…"), self._ask_files)
+            clear = menu.addAction(icon("clear"), tr("Quitar los terminados"), self._clear_finished)
             clear.setEnabled(any(j.status == Status.DONE for j in self.jobs))
             menu.exec(self.tree.viewport().mapToGlobal(pos))
             return
         if job.status == Status.DONE and job.output:
-            menu.addAction(icon("media-playback-start"), tr("Ver el vídeo convertido"),
-                           lambda: open_path(job.output))
-            menu.addAction(icon("document-open-folder", "folder"), tr("Mostrar en la carpeta"),
+            menu.addAction(icon("play"),
+                           tr("Ver las imágenes") if job.preset.is_image_sequence else tr("Ver el vídeo convertido"),
+                           lambda: self._view_output(job))
+            menu.addAction(icon("folder-open"), tr("Mostrar en la carpeta"),
                            lambda: reveal(job.output))
-        menu.addAction(icon("video-x-generic"), tr("Ver el original"), lambda: open_path(job.source))
+        if job.is_sequence:
+            menu.addAction(icon("play"), tr("Reproducir la secuencia"), lambda: self._view_source(job))
+            menu.addAction(icon("folder-open"), tr("Mostrar la secuencia en la carpeta"),
+                           lambda: reveal(job.source.frame_path(job.source.first)))
+        else:
+            menu.addAction(icon("video"), tr("Ver el original"), lambda: open_path(job.source))
         if job.status in FINISHED:
-            menu.addAction(icon("view-refresh"), tr("Volver a convertir"), lambda: self._retry(job))
+            menu.addAction(icon("retry"), tr("Volver a convertir"), lambda: self._retry(job))
         if job.id in self.runner.logs and job.status == Status.FAILED:
-            menu.addAction(icon("dialog-information"), tr("Ver el error completo"),
+            menu.addAction(icon("info"), tr("Ver el error completo"),
                            lambda: self._show_log(job))
         menu.addSeparator()
-        remove = menu.addAction(icon("list-remove"), tr("Quitar de la lista"), self.remove_selected)
+        remove = menu.addAction(icon("remove"), tr("Quitar de la lista"), self.remove_selected)
         remove.setEnabled(job.status not in ACTIVE)
-        clear = menu.addAction(icon("edit-clear-history"), tr("Quitar los terminados"), self._clear_finished)
+        clear = menu.addAction(icon("clear"), tr("Quitar los terminados"), self._clear_finished)
         clear.setEnabled(any(j.status == Status.DONE for j in self.jobs))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -689,7 +768,7 @@ class MainWindow(QMainWindow):
         else:
             self.btn_convert.setToolTip(tr("Añade vídeos para convertir."))
         self.btn_pause.setText(tr("Continuar") if self.runner.paused else tr("Pausa"))
-        self.btn_pause.setIcon(icon("media-playback-start" if self.runner.paused else "media-playback-pause"))
+        self.btn_pause.setIcon(icon("play" if self.runner.paused else "pause"))
         self.btn_remove.setEnabled(any(j.status not in ACTIVE for j in self._selected_jobs()))
         if not self.btn_remove.isEnabled():
             self.btn_remove.setToolTip(tr("Selecciona en la lista los vídeos que quieras quitar."))
@@ -698,6 +777,8 @@ class MainWindow(QMainWindow):
                                           "No borra nada del disco."))
         self.btn_open_folder.setVisible(not running and any(j.status == Status.DONE for j in self.jobs))
         self.out_combo.setEnabled(not running)
+        self.fps_row.setVisible(any(j.is_sequence for j in self.jobs))
+        self.fps_combo.setEnabled(any(j.is_sequence and j.status in EDITABLE for j in self.jobs))
 
         # a quién se aplica el perfil, dicho en la propia etiqueta
         selected = [j for j in self._selected_jobs() if j.status in EDITABLE]

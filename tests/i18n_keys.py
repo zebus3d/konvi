@@ -24,7 +24,8 @@ def data_keys():
         keys |= {c.label, c.tooltip}
     for p in presets.BUILTIN:
         keys |= {p.name, p.description}
-    for table in (preset_dialog.RESOLUTIONS, preset_dialog.FPS, preset_dialog.SPEEDS):
+    for table in (preset_dialog.RESOLUTIONS, preset_dialog.FPS, preset_dialog.IMAGE_FPS,
+                  preset_dialog.SPEEDS):
         keys |= {text for text, _ in table}
     return keys
 

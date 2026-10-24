@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8c7bf0"/>
+      <stop offset="1" stop-color="#5b45c9"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="40" height="40" rx="9" fill="url(#g)"/>
+  <rect x="4" y="4" width="40" height="40" rx="9" fill="none" stroke="#000000" stroke-opacity="0.12" stroke-width="1"/>
+  <!-- pantalla con play -->
+  <rect x="9.5" y="10" width="29" height="19" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+  <path d="M 21 14.5 L 28.5 19.5 L 21 24.5 Z" fill="#ffffff" stroke="#ffffff" stroke-width="1" stroke-linejoin="round"/>
+  <!-- subtítulos -->
+  <rect x="11" y="32.5" width="26" height="3" rx="1.5" fill="#ffffff"/>
+  <rect x="15" y="37.5" width="18" height="3" rx="1.5" fill="#ffe082"/>
+</svg>
