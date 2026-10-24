@@ -2,7 +2,8 @@
 Type=Service
 MimeType=video/*;audio/*;inode/directory;
 Actions=konvi;
-X-KDE-Priority=TopLevel
+X-KDE-Submenu=zebus3d
+Icon=folder-favorites
 
 [Desktop Action konvi]
 Name=Convert with Konvi

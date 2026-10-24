@@ -118,7 +118,8 @@ No necesita permisos de administrador. Instala en tu usuario:
 
 - el programa en `~/.local/share/konvi` y la orden `konvi` en `~/.local/bin`;
 - Konvi en el menú de aplicaciones, con su icono;
-- «Convertir con Konvi» en el clic derecho de Dolphin, para vídeos, audios y carpetas
+- «Convertir con Konvi» en el submenú **zebus3d** del clic derecho de Dolphin, para vídeos,
+  audios y carpetas
   (cierra y vuelve a abrir Dolphin para que aparezca).
 
 `./uninstall.sh` lo quita todo menos tus perfiles (`~/.config/konvi`).
