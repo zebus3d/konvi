@@ -35,17 +35,17 @@ class MediaInfo:
     subtitles: tuple = field(default_factory=tuple)    # códecs de subtítulos
 
     def summary(self):
-        """'1920×1080 · 25 fps · H264 · AAC 2.0 · 1:23' para la lista."""
+        """'1920×1080 · 25 fps · H.264 · AAC estéreo · 1:23' para la lista."""
         parts = []
         if self.video:
             v = self.video
             parts.append(f"{v.width}×{v.height}")
             if v.fps:
                 parts.append(f"{v.fps:.3g} fps")
-            parts.append(v.codec.upper())
+            parts.append(codec_name(v.codec))
         for a in self.audio[:1]:
             ch = {1: "mono", 2: "estéreo", 6: "5.1", 8: "7.1"}.get(a.channels, f"{a.channels} canales")
-            parts.append(f"{a.codec.upper()} {ch}")
+            parts.append(f"{codec_name(a.codec)} {ch}")
         if len(self.audio) > 1:
             parts.append(f"{len(self.audio)} pistas de audio")
         if self.subtitles:
@@ -57,6 +57,24 @@ class MediaInfo:
 
 class ProbeError(Exception):
     pass
+
+
+# nombres de ffmpeg -> los que conoce la gente
+CODEC_NAMES = {
+    "h264": "H.264", "hevc": "H.265", "av1": "AV1", "vp9": "VP9", "vp8": "VP8",
+    "mpeg2video": "MPEG-2", "mpeg1video": "MPEG-1", "mpeg4": "MPEG-4", "msmpeg4v3": "DivX",
+    "prores": "ProRes", "dnxhd": "DNxHR", "ffv1": "FFV1", "mjpeg": "MJPEG", "png": "PNG",
+    "wmv2": "WMV", "wmv3": "WMV", "vc1": "VC-1", "theora": "Theora", "huffyuv": "HuffYUV",
+    "aac": "AAC", "mp3": "MP3", "opus": "Opus", "vorbis": "Vorbis", "flac": "FLAC",
+    "ac3": "AC-3", "eac3": "E-AC-3", "dts": "DTS", "truehd": "TrueHD", "mp2": "MP2",
+    "alac": "ALAC", "wmav2": "WMA",
+}
+
+
+def codec_name(codec):
+    if codec.startswith("pcm_"):
+        return "PCM"
+    return CODEC_NAMES.get(codec, codec.upper())
 
 
 def format_duration(seconds):

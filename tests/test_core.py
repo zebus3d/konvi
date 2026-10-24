@@ -210,7 +210,8 @@ class ProbeTests(unittest.TestCase):
         self.assertAlmostEqual(v.fps, 29.97, places=2)
         self.assertEqual(info.audio[0].channels, 6)
         self.assertEqual(info.subtitles, ("mov_text",))
-        self.assertIn("5.1", info.summary())
+        self.assertIn("H.265", info.summary())
+        self.assertIn("AAC 5.1", info.summary())
 
     def test_duracion(self):
         self.assertEqual(format_duration(83), "1:23")
