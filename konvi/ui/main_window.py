@@ -91,17 +91,18 @@ class MainWindow(QMainWindow):
             b = QToolButton()
             b.setText(cat.label)
             b.setIcon(icon(cat.icon))
-            b.setIconSize(QSize(32, 32))
+            b.setIconSize(QSize(40, 40))
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
             b.setCheckable(True)
             b.setAutoRaise(True)
             b.setMinimumWidth(92)
+            b.setMinimumHeight(76)
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)   # entre todos llenan el ancho
             b.setToolTip(cat.tooltip)
             b.clicked.connect(lambda _=False, c=cat.id: self._category_clicked(c))
             self.category_group.addButton(b)
             self.category_buttons[cat.id] = b
             bar.addWidget(b)
-        bar.addStretch(1)
         root.addLayout(bar)
 
         # perfil
