@@ -7,6 +7,23 @@ HandBrake por dentro, y con el aspecto nativo de tu escritorio (Plasma, GNOME...
 
 Solo convierte: no recorta, no une vídeos ni añade subtítulos.
 
+![Konvi con tres vídeos listos para convertir](docs/img/konvi.png)
+
+<table>
+<tr>
+<td width="62%"><img src="docs/img/konvi-convirtiendo.png" alt="Convirtiendo: uno hecho, otro al 42 % y otro en cola"></td>
+<td><img src="docs/img/konvi-personalizar.png" alt="Personalizar un perfil: calidad o tamaño final, resolución, fps, velocidad y sonido"></td>
+</tr>
+<tr>
+<td>Convirtiendo: progreso de cada vídeo y de toda la tanda, con pausa y detener.</td>
+<td>«Personalizar…»: calidad o tamaño final, resolución, fps y sonido.</td>
+</tr>
+</table>
+
+En inglés si el sistema no está en español:
+
+![Konvi in English](docs/img/konvi-en.png)
+
 Está en **español y en inglés**: si el sistema está en español, sale en español; en
 cualquier otro idioma, en inglés. Las traducciones están en `konvi/i18n_en.py`, y
 `tests/test_i18n.py` falla si algún texto se queda sin traducir.
@@ -40,7 +57,7 @@ nunca parece terminado.
 | **WebM** | VP9, AV1 |
 | **Edición** | DNxHR HQ y LB para DaVinci Resolve, ProRes 422 HQ y Proxy |
 | **MPEG / DVD** | MPEG-2, DVD PAL |
-| **Web y redes** | YouTube/Vimeo, WhatsApp/Telegram, Discord (< 10 MB), correo (< 25 MB) |
+| **Web y redes** | YouTube/Vimeo, WhatsApp/Telegram, Discord (< 20 MB, lo que permite la cuenta gratuita), correo (< 25 MB) |
 | **Móvil y TV** | Móvil 1080p y 720p, Smart TV hasta 4K (H.265) |
 | **Solo audio** | MP3, M4A (AAC), Opus, FLAC, WAV |
 
@@ -62,8 +79,8 @@ Lo que hace por dentro, tomado de HandBrake:
 - Conserva capítulos, metadatos, la rotación del móvil y los 10 bits en H.265/AV1.
 - Con la **tarjeta gráfica** (NVIDIA NVENC o VAAPI de AMD/Intel) H.264 y H.265 van mucho
   más rápido; viene activada siempre que la haya (desmarcarla vale para esa sesión). Con
-  NVENC la calidad usa su propia escala (en H.265, CQ 27 donde por procesador sería CRF 22,
-  como HandBrake). Konvi comprueba al arrancar qué funciona de verdad (no basta con que ffmpeg
+  NVENC la calidad usa su propia escala, medida con VMAF sobre vídeos reales: CQ = CRF + 3
+  da la misma calidad que el procesador (el +5 de HandBrake se quedaba corto). Konvi comprueba al arrancar qué funciona de verdad (no basta con que ffmpeg
   lo liste) y, si la tarjeta falla a mitad, vuelve a convertir ese vídeo con el procesador.
 - No deja que el equipo se suspenda mientras convierte.
 

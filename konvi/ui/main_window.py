@@ -22,10 +22,6 @@ from .workers import Workers
 
 COL_FILE, COL_PRESET, COL_STATUS = range(3)
 CHOOSE_FOLDER = "__choose__"
-STATUS_ICON = {Status.PROBING: "view-refresh", Status.READY: "", Status.INVALID: "dialog-warning",
-               Status.RUNNING: "media-playback-start", Status.PAUSED: "media-playback-pause",
-               Status.DONE: "dialog-ok-apply", Status.FAILED: "dialog-error",
-               Status.CANCELLED: "dialog-cancel"}
 
 
 def human_size(n):
@@ -475,12 +471,14 @@ class MainWindow(QMainWindow):
         item.setText(COL_PRESET, tr(job.preset.name))
         item.setToolTip(COL_PRESET, tr(job.preset.description))
         text, tip = self._status_text(job)
-        item.setText(COL_STATUS, text)
+        active = job.status in ACTIVE
+        # sin icono: la lista usa iconos de 96×54 para las miniaturas y saldrían enormes;
+        # y en marcha el texto lo pone la barra (si no, se pintan uno encima del otro)
+        item.setText(COL_STATUS, "" if active else text)
         item.setToolTip(COL_STATUS, tip or text)
-        item.setIcon(COL_STATUS, icon(STATUS_ICON[job.status], "") if STATUS_ICON[job.status] else QIcon())
 
         bar = self.tree.itemWidget(item, COL_STATUS)
-        if job.status in ACTIVE:
+        if active:
             if bar is None:
                 bar = QProgressBar()
                 bar.setRange(0, 1000)

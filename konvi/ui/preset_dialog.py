@@ -83,7 +83,7 @@ class PresetDialog(QDialog):
             w.setEnabled(False)       # texto atenuado: es una pista, no un control
         self.size_mb = QDoubleSpinBox()
         self.size_mb.setRange(1, 100000)
-        self.size_mb.setDecimals(0)
+        self.size_mb.setDecimals(1)
         self.size_mb.setSuffix(" MB")
         self.size_mb.setValue(preset.target_mb or 25)
         self.size_mb.setToolTip(tr("El vídeo se ajusta para no pasar de este tamaño (con el audio).\n"

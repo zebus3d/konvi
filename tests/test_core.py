@@ -152,8 +152,8 @@ class CommandTests(unittest.TestCase):
         self.assertEqual([command.auto_height(k) for k in (8000, 3000, 1200, 500, 100)],
                          [1080, 720, 540, 360, 240])
         # más largo, más pequeño (como «Social 10 MB 30 Seconds 720p» de HandBrake, etc.)
-        cases = (("web_email", 20, None), ("web_discord", 20, "720"), ("web_discord", 60, "540"),
-                 ("web_discord", 150, "360"))
+        cases = (("web_email", 20, None), ("web_discord", 20, None), ("web_discord", 60, "720"),
+                 ("web_discord", 150, "360"), ("web_discord", 300, "240"))
         for pid, seconds, height in cases:
             with self.subTest(f"{pid} {seconds}s"):
                 vf = value(args_for(media(duration=seconds), P[pid]), "-vf") or ""
@@ -177,7 +177,9 @@ class CommandTests(unittest.TestCase):
     def test_nvenc_con_su_escala_de_calidad(self):
         hw = command.Hardware(nvenc=frozenset({"h264", "h265"}))
         a = args_for(media(), P["mp4_h265"], hardware=hw, use_hardware=True)
-        self.assertEqual(value(a, "-cq"), "27")                     # RF 22 por CPU = CQ 27 por GPU
+        self.assertEqual(value(a, "-cq"), "25")                     # CRF 22 por CPU ≈ CQ 25 por GPU (VMAF)
+        a = args_for(media(), P["mp4_h264"], hardware=hw, use_hardware=True)
+        self.assertEqual(value(a, "-cq"), "23")                     # CRF 20 por CPU ≈ CQ 23 por GPU
         self.assertEqual(value(a, "-rc-lookahead"), "10")
 
     def test_mkv_copia_el_audio_tal_cual(self):

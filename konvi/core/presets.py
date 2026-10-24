@@ -165,10 +165,12 @@ BUILTIN = (
     _p("web_whatsapp", "web", "WhatsApp / Telegram",
        "720p y compresión alta: se envía rápido y se ve bien en el móvil.", "mp4",
        quality=26, max_height=720, max_fps=30, compat=True, audio_kbps=128, stereo=True),
-    _p("web_discord", "web", "Discord (menos de 10 MB)",
-       "Ajusta la calidad para que el vídeo quepa en 10 MB. La resolución se elige\n"
-       "sola según lo que dure: cuanto más largo, más pequeña.", "mp4",
-       max_fps=30, target_mb=9.5, compat=True, audio_kbps=96, stereo=True),
+    # Discord gratis: 20 MB por fichero desde el 14-08-2026 (antes 10). Se apunta a 18,5 MiB
+    # (19,4 MB) por si Discord cuenta en MB y no en MiB.
+    _p("web_discord", "web", "Discord (menos de 20 MB)",
+       "Para compartirlo en Discord sin pagar: cabe en los 20 MB de la cuenta gratuita\n"
+       "y se ve dentro del chat. La resolución se elige sola según lo que dure.", "mp4",
+       max_fps=30, target_mb=18.5, compat=True, audio_kbps=96, stereo=True),
     _p("web_email", "web", "Correo (menos de 25 MB)",
        "Ajusta la calidad para que el vídeo quepa como adjunto de 25 MB. La resolución\n"
        "se elige sola según lo que dure: cuanto más largo, más pequeña.", "mp4",

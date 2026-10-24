@@ -26,9 +26,10 @@ SURROUND_COPY = {"ac3", "eac3"}       # envolvente que el MP4 y las teles acepta
 X265_TUNE = "strong-intra-smoothing=0:rect=0:aq-mode=1:rd=4:psy-rd=0.75:psy-rdoq=4.0:rdoq-level=1:rskip=2"
 SVTAV1_TUNE = ("enable-variance-boost=1:enable-qm=1:ac-bias=1:tf-strength=1:"
                "qp-scale-compress-strength=1:sharpness=1")
-# La escala de calidad de NVENC no es la del CRF: HandBrake usa CQ 27 en H.265 por GPU donde
-# por CPU usa RF 22. H.264 queda igual hasta medirlo.
-NVENC_CQ_OFFSET = {"h264": 0, "h265": 5}
+# La escala de calidad de NVENC no es la del CRF. Medido con VMAF (2026-10-24, RTX 3070, un
+# render 3D y vídeo grabado, 20 s cada uno): NVENC iguala a x264 CRF 20 con CQ ≈ 23, y a
+# x265 CRF 22 con CQ ≈ 25. El +5 de HandBrake (CQ 27) perdía 0,5-1,7 puntos de VMAF.
+NVENC_CQ_OFFSET = {"h264": 3, "h265": 3}
 
 # Perfiles de tamaño final: la resolución sale del bitrate que queda (como los «Social» de
 # HandBrake: 25 MB en 30 s → 1080p, 1 min → 720p, 2 min → 540p, 5 min → 360p)

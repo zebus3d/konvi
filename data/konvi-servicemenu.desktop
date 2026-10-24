@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Service
 MimeType=video/*;audio/*;inode/directory;
-Actions=konvi;
+Actions=a80-konvi;
 X-KDE-Submenu=zebus3d
 Icon=folder-favorites
 
-[Desktop Action konvi]
+[Desktop Action a80-konvi]
 Name=Convert with Konvi
 Name[es]=Convertir con Konvi
 Icon=konvi

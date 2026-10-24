@@ -87,11 +87,11 @@ EN = {
     "WhatsApp / Telegram": "WhatsApp / Telegram",
     "720p y compresión alta: se envía rápido y se ve bien en el móvil.":
         "720p and high compression: quick to send and looks good on a phone.",
-    "Discord (menos de 10 MB)": "Discord (under 10 MB)",
-    "Ajusta la calidad para que el vídeo quepa en 10 MB. La resolución se elige\n"
-    "sola según lo que dure: cuanto más largo, más pequeña.":
-        "Adjusts the quality so the video fits in 10 MB. The resolution is chosen\n"
-        "automatically from its length: the longer it is, the smaller.",
+    "Discord (menos de 20 MB)": "Discord (under 20 MB)",
+    "Para compartirlo en Discord sin pagar: cabe en los 20 MB de la cuenta gratuita\n"
+    "y se ve dentro del chat. La resolución se elige sola según lo que dure.":
+        "To share it on Discord without paying: it fits in the free account's 20 MB\n"
+        "and plays right in the chat. The resolution is chosen from its length.",
     "Correo (menos de 25 MB)": "Email (under 25 MB)",
     "Ajusta la calidad para que el vídeo quepa como adjunto de 25 MB. La resolución\n"
     "se elige sola según lo que dure: cuanto más largo, más pequeña.":
