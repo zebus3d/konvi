@@ -5,7 +5,7 @@ import shutil
 import signal
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
 from ..core import command, naming
 from ..core.jobs import Status
@@ -91,6 +91,9 @@ class Runner(QObject):
         self.paused = False
 
         proc = QProcess(self)
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("SVT_LOG", "1")            # SVT-AV1: solo errores, no su informe de arranque
+        proc.setProcessEnvironment(env)
         proc.setProgram(args[0])
         proc.setArguments(args[1:])
         proc.readyReadStandardOutput.connect(self._on_stdout)

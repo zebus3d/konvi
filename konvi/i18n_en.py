@@ -54,7 +54,8 @@ EN = {
         "Exact, pixel-perfect copy. Large files. VLC, mpv and DaVinci play it,\n"
         "but not every player does (it is H.264 High 4:4:4).",
     "H.264 · todas las pistas": "H.264 · all tracks",
-    "Conserva todos los idiomas y subtítulos.": "Keeps every language and subtitle.",
+    "Conserva todos los idiomas y subtítulos; el sonido se copia tal cual.":
+        "Keeps every language and subtitle; the sound is copied as is.",
     "H.265 · todas las pistas": "H.265 · all tracks",
     "Para guardar películas y series: la mitad de tamaño que H.264,\ncon todos los idiomas y subtítulos.":
         "For keeping films and series: half the size of H.264,\nwith every language and subtitle.",
@@ -87,18 +88,24 @@ EN = {
     "720p y compresión alta: se envía rápido y se ve bien en el móvil.":
         "720p and high compression: quick to send and looks good on a phone.",
     "Discord (menos de 10 MB)": "Discord (under 10 MB)",
-    "Ajusta la calidad para que el vídeo quepa en 10 MB.\nCuanto más largo el vídeo, peor se verá.":
-        "Adjusts the quality so the video fits in 10 MB.\nThe longer the video, the worse it will look.",
+    "Ajusta la calidad para que el vídeo quepa en 10 MB. La resolución se elige\n"
+    "sola según lo que dure: cuanto más largo, más pequeña.":
+        "Adjusts the quality so the video fits in 10 MB. The resolution is chosen\n"
+        "automatically from its length: the longer it is, the smaller.",
     "Correo (menos de 25 MB)": "Email (under 25 MB)",
-    "Ajusta la calidad para que el vídeo quepa como adjunto de 25 MB.":
-        "Adjusts the quality so the video fits as a 25 MB attachment.",
+    "Ajusta la calidad para que el vídeo quepa como adjunto de 25 MB. La resolución\n"
+    "se elige sola según lo que dure: cuanto más largo, más pequeña.":
+        "Adjusts the quality so the video fits as a 25 MB attachment. The resolution\n"
+        "is chosen automatically from its length: the longer it is, the smaller.",
     "Móvil o tablet · 1080p": "Phone or tablet · 1080p",
     "Lo abre cualquier móvil o tablet, también los antiguos.": "Plays on any phone or tablet, old ones too.",
     "Móvil · 720p (ocupa poco)": "Phone · 720p (small)",
     "Para llevar muchos vídeos en el móvil.": "To carry lots of videos on your phone.",
     "Smart TV · hasta 4K (H.265)": "Smart TV · up to 4K (H.265)",
-    "Para la tele: H.265 hasta 4K, con el sonido envolvente si lo tiene.":
-        "For the TV: H.265 up to 4K, with surround sound if it has it.",
+    "Para la tele: H.265 hasta 4K. Si tiene sonido envolvente, lo conserva\n"
+    "y añade una pista en estéreo para que suene en cualquier sitio.":
+        "For the TV: H.265 up to 4K. If it has surround sound, it keeps it\n"
+        "and adds a stereo track so it plays anywhere.",
     "MP3 · 320 kbps": "MP3 · 320 kbps",
     "El más compatible.": "The most compatible.",
     "M4A (AAC) · 256 kbps": "M4A (AAC) · 256 kbps",

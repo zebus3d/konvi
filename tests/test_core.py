@@ -85,7 +85,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(value(a, "-ac:a:0"), "2")
 
     def test_opus_5_1(self):
-        a = args_for(media(audio=(("ac3", 6, 448000),)), P["mkv_av1"])
+        a = args_for(media(audio=(("ac3", 6, 448000),)), P["webm_av1"])
         self.assertEqual(value(a, "-filter:a:0"), "aformat=channel_layouts=5.1")
 
     def test_todas_las_pistas_y_subtitulos_en_mkv(self):
@@ -145,6 +145,59 @@ class CommandTests(unittest.TestCase):
         a = args_for(media(), P["mp4_h264"], hardware=vaapi, use_hardware=True)
         self.assertIn("hwupload", value(a, "-vf"))
         self.assertLess(a.index("-vaapi_device"), a.index("-i"))
+
+    # --- lo adoptado de los presets de HandBrake
+
+    def test_tamano_final_elige_la_resolucion_por_la_duracion(self):
+        self.assertEqual([command.auto_height(k) for k in (8000, 3000, 1200, 500, 100)],
+                         [1080, 720, 540, 360, 240])
+        # más largo, más pequeño (como «Social 10 MB 30 Seconds 720p» de HandBrake, etc.)
+        cases = (("web_email", 20, None), ("web_discord", 20, "720"), ("web_discord", 60, "540"),
+                 ("web_discord", 150, "360"))
+        for pid, seconds, height in cases:
+            with self.subTest(f"{pid} {seconds}s"):
+                vf = value(args_for(media(duration=seconds), P[pid]), "-vf") or ""
+                if height:
+                    self.assertIn(f"scale=-2:{height}", vf)
+                else:
+                    self.assertNotIn("scale", vf)                   # cabe en 1080p: se deja
+
+    def test_h265_y_av1_siempre_en_10_bits(self):
+        self.assertEqual(value(args_for(media(), P["mp4_h265"]), "-pix_fmt"), "yuv420p10le")
+        self.assertEqual(value(args_for(media(), P["mp4_av1"]), "-pix_fmt"), "yuv420p10le")
+        hw = command.Hardware(nvenc=frozenset({"h264", "h265"}))
+        self.assertEqual(value(args_for(media(), P["mp4_h265"], hardware=hw, use_hardware=True), "-pix_fmt"),
+                         "p010le")
+        self.assertEqual(value(args_for(media(), P["mp4_h264"]), "-pix_fmt"), "yuv420p")
+
+    def test_afinado_de_x265_y_svt_av1(self):
+        self.assertIn(command.X265_TUNE, value(args_for(media(), P["mp4_h265"]), "-x265-params"))
+        self.assertEqual(value(args_for(media(), P["mp4_av1"]), "-svtav1-params"), command.SVTAV1_TUNE)
+
+    def test_nvenc_con_su_escala_de_calidad(self):
+        hw = command.Hardware(nvenc=frozenset({"h264", "h265"}))
+        a = args_for(media(), P["mp4_h265"], hardware=hw, use_hardware=True)
+        self.assertEqual(value(a, "-cq"), "27")                     # RF 22 por CPU = CQ 27 por GPU
+        self.assertEqual(value(a, "-rc-lookahead"), "10")
+
+    def test_mkv_copia_el_audio_tal_cual(self):
+        info = media(audio=(("dts", 6, 1536000), ("aac", 2, 128000)))
+        a = args_for(info, P["mkv_h265"])
+        self.assertEqual((value(a, "-c:a:0"), value(a, "-c:a:1")), ("copy", "copy"))
+
+    def test_tele_estereo_mas_envolvente(self):
+        a = args_for(media(audio=(("eac3", 6, 640000),)), P["device_tv"])
+        self.assertEqual((value(a, "-c:a:0"), value(a, "-ac:a:0"), value(a, "-c:a:1")), ("aac", "2", "copy"))
+        a = args_for(media(audio=(("aac", 6, 384000),)), P["device_tv"])
+        self.assertEqual((value(a, "-c:a:1"), value(a, "-b:a:1")), ("ac3", "640k"))
+        a = args_for(media(audio=(("aac", 2, 128000),)), P["device_tv"])
+        self.assertNotIn("-c:a:1", a)                               # estéreo: una sola pista
+
+    def test_pcm_de_24_bits_para_editar(self):
+        a = args_for(media(), P["edit_dnxhr_hq"])
+        self.assertEqual(value(a, "-c:a:0"), "pcm_s24le")
+        a = args_for(media(audio=(("pcm_s24le", 2, 0),)), P["edit_dnxhr_hq"])
+        self.assertEqual(value(a, "-c:a:0"), "copy")
 
     def test_dvd(self):
         a = args_for(media(), P["mpeg_dvd"])

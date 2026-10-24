@@ -19,7 +19,20 @@ SPEED = {
     "nvenc": {"fast": "p3", "medium": "p5", "slow": "p7"},
 }
 AUDIO_ENCODER = {"aac": "aac", "opus": "libopus", "mp3": "libmp3lame", "flac": "flac",
-                 "pcm": "pcm_s16le", "ac3": "ac3", "mp2": "mp2"}
+                 "pcm": "pcm_s24le", "ac3": "ac3", "mp2": "mp2"}
+SURROUND_COPY = {"ac3", "eac3"}       # envolvente que el MP4 y las teles aceptan tal cual
+
+# Afinado de HandBrake (preset_builtin.json): conserva más detalle a igual tamaño
+X265_TUNE = "strong-intra-smoothing=0:rect=0:aq-mode=1:rd=4:psy-rd=0.75:psy-rdoq=4.0:rdoq-level=1:rskip=2"
+SVTAV1_TUNE = ("enable-variance-boost=1:enable-qm=1:ac-bias=1:tf-strength=1:"
+               "qp-scale-compress-strength=1:sharpness=1")
+# La escala de calidad de NVENC no es la del CRF: HandBrake usa CQ 27 en H.265 por GPU donde
+# por CPU usa RF 22. H.264 queda igual hasta medirlo.
+NVENC_CQ_OFFSET = {"h264": 0, "h265": 5}
+
+# Perfiles de tamaño final: la resolución sale del bitrate que queda (como los «Social» de
+# HandBrake: 25 MB en 30 s → 1080p, 1 min → 720p, 2 min → 540p, 5 min → 360p)
+AUTO_HEIGHT = ((5000, 1080), (2200, 720), (1100, 540), (400, 360))
 LOSSY_AUDIO = {"aac", "opus", "mp3", "ac3", "mp2"}
 FASTSTART = {"mp4", "mov", "m4a"}
 # códecs con submuestreo de color: exigen ancho (y alto) pares
@@ -80,6 +93,11 @@ def target_video_kbps(info, preset):
     return int(total_kbit / (max(info.duration, 0.1) + 1) - audio)
 
 
+def auto_height(kbps):
+    """Resolución que da para ese bitrate de vídeo en un perfil de tamaño final."""
+    return next((h for minimum, h in AUTO_HEIGHT if kbps >= minimum), 240)
+
+
 def output_fps(info, preset):
     fps = info.video.fps if info.video else 0
     if preset.max_fps and fps > preset.max_fps + 0.01:
@@ -104,7 +122,9 @@ def _is_rgb(v):
 
 
 def _pix_fmt(codec, v, hw):
-    ten_bit = v.bit_depth > 8 and codec in ("h265", "av1")
+    # H.265 y AV1 siempre en 10 bits, como HandBrake: comprime mejor y sin escalones en los
+    # degradados aunque el original sea de 8. Todo lo que reproduce HEVC o AV1 lo admite.
+    ten_bit = codec in ("h265", "av1")
     if hw == "nvenc":
         return "p010le" if ten_bit else "yuv420p"
     if codec in ("h264", "vp9", "mpeg2"):
@@ -123,10 +143,22 @@ def _video_args(info, preset, hw_kind, hardware):
     codec = preset.video
     vf, args = [], []
 
+    q = preset.effective_quality()
+    if preset.target_mb:
+        # Calidad constante con tope de bitrate: siempre cabe en el tamaño, y un vídeo corto
+        # no se infla hasta llenarlo. El tope respeta el máximo de H.264 High@4.1.
+        kbps = target_video_kbps(info, preset)
+        if preset.compat:
+            kbps = min(kbps, 50000)
+        cap = ["-maxrate", f"{kbps}k", "-bufsize", f"{kbps}k"]
+        limit = min(filter(None, (preset.max_height, auto_height(kbps))))
+    else:
+        kbps, cap, limit = 0, [], preset.max_height
+
     if v.interlaced:
         vf.append("bwdif=mode=send_frame")
     if preset.profile != "dvd":
-        scale = _scale_filter(v, preset.max_height)
+        scale = _scale_filter(v, limit)
         if scale:
             vf.append(scale)
         elif codec in NEEDS_EVEN and (v.width % 2 or v.height % 2) and \
@@ -143,19 +175,10 @@ def _video_args(info, preset, hw_kind, hardware):
 
     pix = _pix_fmt(codec, v, hw_kind)
     if hw_kind == "vaapi":
-        vf.append(f"format={'p010' if pix == 'yuv420p10le' else 'nv12'},hwupload")
+        # VAAPI: 10 bits solo si el original los tiene (no todas las gráficas hacen HEVC Main10)
+        ten = codec == "h265" and v.bit_depth > 8
+        vf.append(f"format={'p010' if ten else 'nv12'},hwupload")
         pix = None
-
-    q = preset.effective_quality()
-    if preset.target_mb:
-        # Calidad constante con tope de bitrate: siempre cabe en el tamaño, y un vídeo corto
-        # no se infla hasta llenarlo. El tope respeta el máximo de H.264 High@4.1.
-        kbps = target_video_kbps(info, preset)
-        if preset.compat:
-            kbps = min(kbps, 50000)
-        cap = ["-maxrate", f"{kbps}k", "-bufsize", f"{kbps}k"]
-    else:
-        kbps, cap = 0, []
 
     if codec == "h264" and preset.lossless:
         # RGB (PNG, capturas) en RGB; vídeo normal en su propio formato de color: así no se
@@ -166,8 +189,9 @@ def _video_args(info, preset, hw_kind, hardware):
         pix = None if rgb or v.pix_fmt.startswith("yuv") else "yuv420p"
     elif codec in ("h264", "h265") and hw_kind == "nvenc":
         args += ["-c:v", "h264_nvenc" if codec == "h264" else "hevc_nvenc",
-                 "-preset", SPEED["nvenc"][preset.speed], "-tune", "hq", "-rc", "vbr"]
-        args += ["-cq", str(q), "-b:v", "0", *cap]
+                 "-preset", SPEED["nvenc"][preset.speed], "-tune", "hq", "-rc", "vbr",
+                 "-rc-lookahead", "10"]
+        args += ["-cq", str(q + NVENC_CQ_OFFSET[codec]), "-b:v", "0", *cap]
     elif codec in ("h264", "h265") and hw_kind == "vaapi":
         args += ["-c:v", "h264_vaapi" if codec == "h264" else "hevc_vaapi"]
         args += ["-rc_mode", "VBR", "-b:v", f"{kbps}k", *cap] if cap else ["-qp", str(q)]
@@ -175,9 +199,10 @@ def _video_args(info, preset, hw_kind, hardware):
         args += ["-c:v", "libx264", "-preset", SPEED["x26x"][preset.speed], "-crf", str(q), *cap]
     elif codec == "h265":
         args += ["-c:v", "libx265", "-preset", SPEED["x26x"][preset.speed],
-                 "-x265-params", "log-level=error", "-crf", str(q), *cap]
+                 "-x265-params", f"log-level=error:{X265_TUNE}", "-crf", str(q), *cap]
     elif codec == "av1":
-        args += ["-c:v", "libsvtav1", "-preset", SPEED["svtav1"][preset.speed], "-crf", str(q), *cap]
+        args += ["-c:v", "libsvtav1", "-preset", SPEED["svtav1"][preset.speed],
+                 "-svtav1-params", SVTAV1_TUNE, "-crf", str(q), *cap]
     elif codec == "vp9":
         args += ["-c:v", "libvpx-vp9", "-row-mt", "1", "-deadline", "good",
                  "-cpu-used", SPEED["vp9"][preset.speed]]
@@ -215,11 +240,24 @@ def _audio_args(info, preset):
     if not preset.audio or not info.audio:
         return ["-an"]
     tracks = list(enumerate(info.audio)) if preset.all_audio else [(0, info.audio[0])]
+    if preset.audio == "copy":
+        # tal cual, sin recodificar: no se pierde nada (MKV admite cualquier audio)
+        args = []
+        for out_i, (src_i, _) in enumerate(tracks):
+            args += ["-map", f"0:a:{src_i}", f"-c:a:{out_i}", "copy"]
+        return args
+    first = info.audio[0]
+    if preset.surround and first.channels > 2 and not preset.all_audio:
+        # Como los perfiles «Surround» de HandBrake: estéreo AAC para que suene en todo,
+        # y además el envolvente original (o en AC-3 si no se puede copiar)
+        surround = ["copy"] if first.codec in SURROUND_COPY else ["ac3", "-b:a:1", "640k"]
+        return ["-map", "0:a:0", "-c:a:0", "aac", "-b:a:0", f"{preset.audio_kbps}k", "-ac:a:0", "2",
+                "-map", "0:a:0", "-c:a:1", *surround]
     args = []
     for out_i, (src_i, a) in enumerate(tracks):
         args += ["-map", f"0:a:{src_i}"]
         must_downmix = preset.stereo and a.channels > 2
-        same = a.codec == preset.audio or (preset.audio == "pcm" and a.codec.startswith("pcm_s16"))
+        same = a.codec == preset.audio or (preset.audio == "pcm" and a.codec in ("pcm_s16le", "pcm_s24le"))
         small_enough = (preset.audio not in LOSSY_AUDIO or a.bitrate == 0 or
                         a.bitrate <= preset.audio_kbps * 1000 * 1.1)
         if same and small_enough and not must_downmix and not preset.target_mb:

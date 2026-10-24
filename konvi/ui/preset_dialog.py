@@ -162,7 +162,7 @@ class PresetDialog(QDialog):
                                   "Recomendado para móviles, auriculares y redes sociales."))
         if preset.audio in LOSSY_AUDIO:
             _row(form, tr("Sonido:"), self.audio_kbps)
-        if preset.audio:
+        if preset.audio and preset.audio != "copy" and not preset.surround:
             form.addRow("", self.stereo)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)

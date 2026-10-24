@@ -15,7 +15,7 @@ from konvi.core import command, encoders, presets, probe
 
 EXPECTED_VIDEO = {"h264": "h264", "h265": "hevc", "av1": "av1", "vp9": "vp9", "prores": "prores",
                   "dnxhr": "dnxhd", "ffv1": "ffv1", "mpeg2": "mpeg2video"}
-EXPECTED_AUDIO = {"aac": "aac", "opus": "opus", "mp3": "mp3", "flac": "flac", "pcm": "pcm_s16le",
+EXPECTED_AUDIO = {"aac": "aac", "opus": "opus", "mp3": "mp3", "flac": "flac", "pcm": "pcm_s24le",
                   "ac3": "ac3", "mp2": "mp2"}
 
 
@@ -81,7 +81,10 @@ class RealConversions(unittest.TestCase):
             self.assertNotIn("video", kinds, preset.id)
         if preset.audio and info.audio:
             names = {s["codec_name"] for s in kinds["audio"]}
-            self.assertTrue(names & {EXPECTED_AUDIO[preset.audio], info.audio[0].codec}, (preset.id, names))
+            expected = {info.audio[0].codec}
+            if preset.audio != "copy":
+                expected.add(EXPECTED_AUDIO[preset.audio])
+            self.assertTrue(names & expected, (preset.id, names))
         if info.duration:
             self.assertAlmostEqual(float(data["format"]["duration"]), info.duration, delta=0.6)
         return data, kinds
@@ -106,8 +109,12 @@ class RealConversions(unittest.TestCase):
         self.assertEqual(kinds["audio"][0]["channels"], 6)
 
     def test_opus_con_5_1_side(self):
-        _, kinds = self.convert("raro", presets.builtin_by_id()["mkv_av1"])
+        _, kinds = self.convert("raro", presets.builtin_by_id()["webm_av1"])
         self.assertEqual(kinds["audio"][0]["channels"], 6)
+
+    def test_tele_estereo_mas_envolvente(self):
+        _, kinds = self.convert("raro", presets.builtin_by_id()["device_tv"])
+        self.assertEqual([s["channels"] for s in kinds["audio"]], [2, 6])
 
     def test_whatsapp_baja_a_estereo(self):
         _, kinds = self.convert("raro", presets.builtin_by_id()["web_whatsapp"])

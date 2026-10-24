@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Códecs de vídeo que entiende command.py
 VIDEO_CODECS = ("h264", "h265", "av1", "vp9", "prores", "dnxhr", "ffv1", "mpeg2")
-AUDIO_CODECS = ("aac", "opus", "mp3", "flac", "pcm", "ac3", "mp2")
+AUDIO_CODECS = ("aac", "opus", "mp3", "flac", "pcm", "ac3", "mp2", "copy")
 
 # Calidad de "Máxima" a "Baja" para cada códec que trabaja con calidad constante
 # (CRF en x264/x265/SVT-AV1/VP9, cuantizador en MPEG-2). La del medio es la de fábrica.
@@ -40,10 +40,11 @@ class Preset:
     profile: str = ""                   # hq/lb (DNxHR), hq/proxy (ProRes), dvd (MPEG-2)
     compat: bool = False                # H.264 High@4.1: lo abre cualquier móvil o tele
     gop_seconds: float | None = None    # fotograma clave cada N s (lo pide YouTube)
-    audio: str | None = "aac"           # None = sin audio
+    audio: str | None = "aac"           # None = sin audio; "copy" = tal cual, sin recodificar
     audio_kbps: int = 192
     stereo: bool = False                # mezclar a 2 canales
     all_audio: bool = False             # todas las pistas de audio, no solo la primera
+    surround: bool = False              # estéreo AAC + el envolvente original (como HandBrake)
     subtitles: bool = False             # copiar los subtítulos (solo MKV)
     lossless: bool = False              # H.264 sin pérdida (-qp 0): idéntico al original
     custom: bool = False
@@ -120,16 +121,18 @@ BUILTIN = (
        lossless=True, speed="slow", audio="flac"),
     # --- MKV
     _p("mkv_h264", "mkv", "H.264 · todas las pistas",
-       "Conserva todos los idiomas y subtítulos.", "mkv", all_audio=True, subtitles=True),
+       "Conserva todos los idiomas y subtítulos; el sonido se copia tal cual.", "mkv",
+       audio="copy", all_audio=True, subtitles=True),
     _p("mkv_h265", "mkv", "H.265 · todas las pistas",
        "Para guardar películas y series: la mitad de tamaño que H.264,\n"
-       "con todos los idiomas y subtítulos.", "mkv", video="h265", all_audio=True, subtitles=True),
+       "con todos los idiomas y subtítulos.", "mkv", video="h265", audio="copy",
+       all_audio=True, subtitles=True),
     _p("mkv_av1", "mkv", "AV1 · todas las pistas",
        "Lo que menos ocupa, con todos los idiomas y subtítulos.", "mkv",
-       video="av1", audio="opus", audio_kbps=160, all_audio=True, subtitles=True),
+       video="av1", audio="copy", all_audio=True, subtitles=True),
     _p("mkv_ffv1", "mkv", "Sin pérdida (FFV1)",
        "Copia exacta, píxel a píxel, para archivar. Ocupa muchísimo.", "mkv",
-       video="ffv1", audio="flac", all_audio=True, subtitles=True),
+       video="ffv1", audio="copy", all_audio=True, subtitles=True),
     # --- WebM
     _p("webm_vp9", "webm", "VP9",
        "El vídeo de la web: lo abren todos los navegadores.", "webm",
@@ -163,12 +166,13 @@ BUILTIN = (
        "720p y compresión alta: se envía rápido y se ve bien en el móvil.", "mp4",
        quality=26, max_height=720, max_fps=30, compat=True, audio_kbps=128, stereo=True),
     _p("web_discord", "web", "Discord (menos de 10 MB)",
-       "Ajusta la calidad para que el vídeo quepa en 10 MB.\n"
-       "Cuanto más largo el vídeo, peor se verá.", "mp4",
-       max_height=720, max_fps=30, target_mb=9.5, compat=True, audio_kbps=96, stereo=True),
+       "Ajusta la calidad para que el vídeo quepa en 10 MB. La resolución se elige\n"
+       "sola según lo que dure: cuanto más largo, más pequeña.", "mp4",
+       max_fps=30, target_mb=9.5, compat=True, audio_kbps=96, stereo=True),
     _p("web_email", "web", "Correo (menos de 25 MB)",
-       "Ajusta la calidad para que el vídeo quepa como adjunto de 25 MB.", "mp4",
-       max_height=720, max_fps=30, target_mb=24, compat=True, audio_kbps=128, stereo=True),
+       "Ajusta la calidad para que el vídeo quepa como adjunto de 25 MB. La resolución\n"
+       "se elige sola según lo que dure: cuanto más largo, más pequeña.", "mp4",
+       max_fps=30, target_mb=24, compat=True, audio_kbps=128, stereo=True),
     # --- Móvil y TV
     _p("device_phone", "device", "Móvil o tablet · 1080p",
        "Lo abre cualquier móvil o tablet, también los antiguos.", "mp4",
@@ -177,8 +181,9 @@ BUILTIN = (
        "Para llevar muchos vídeos en el móvil.", "mp4",
        quality=22, max_height=720, max_fps=30, compat=True, audio_kbps=128, stereo=True),
     _p("device_tv", "device", "Smart TV · hasta 4K (H.265)",
-       "Para la tele: H.265 hasta 4K, con el sonido envolvente si lo tiene.", "mp4",
-       video="h265", max_height=2160, audio_kbps=384),
+       "Para la tele: H.265 hasta 4K. Si tiene sonido envolvente, lo conserva\n"
+       "y añade una pista en estéreo para que suene en cualquier sitio.", "mp4",
+       video="h265", max_height=2160, surround=True),
     # --- Solo audio
     _p("audio_mp3", "audio", "MP3 · 320 kbps", "El más compatible.", "mp3",
        video=None, audio="mp3", audio_kbps=320),

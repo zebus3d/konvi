@@ -51,10 +51,19 @@ Lo que hace por dentro, tomado de HandBrake:
 - **Nunca agranda**: «1080p» reduce si el original es mayor y lo deja como está si es menor.
   En vídeos verticales del móvil se refiere al lado corto.
 - **Desentrelaza** solo si el original es entrelazado (DVD, cámaras antiguas).
-- **El audio se copia tal cual** si ya está en el formato pedido; si no, se convierte.
+- **El audio se copia tal cual** si ya está en el formato pedido; si no, se convierte. Los
+  MKV de «todas las pistas» copian todo el audio sin tocarlo, y «Smart TV» deja una pista
+  estéreo y además el sonido envolvente original (como los perfiles «Surround» de HandBrake).
+- **Tamaño final con resolución automática**: Discord y correo eligen la resolución según
+  lo que dure el vídeo (con 25 MB: 30 s → 1080p, 1 min → 720p, 2 min → 540p, 5 min → 360p),
+  igual que los perfiles «Social» de HandBrake.
+- **H.265 y AV1 siempre en 10 bits**, con el afinado de x265 y SVT-AV1 de los presets
+  oficiales de HandBrake (`preset/preset_builtin.json`): más detalle a igual tamaño.
 - Conserva capítulos, metadatos, la rotación del móvil y los 10 bits en H.265/AV1.
 - Con la **tarjeta gráfica** (NVIDIA NVENC o VAAPI de AMD/Intel) H.264 y H.265 van mucho
-  más rápido; viene activada siempre que la haya (desmarcarla vale para esa sesión). Konvi comprueba al arrancar qué funciona de verdad (no basta con que ffmpeg
+  más rápido; viene activada siempre que la haya (desmarcarla vale para esa sesión). Con
+  NVENC la calidad usa su propia escala (en H.265, CQ 27 donde por procesador sería CRF 22,
+  como HandBrake). Konvi comprueba al arrancar qué funciona de verdad (no basta con que ffmpeg
   lo liste) y, si la tarjeta falla a mitad, vuelve a convertir ese vídeo con el procesador.
 - No deja que el equipo se suspenda mientras convierte.
 
