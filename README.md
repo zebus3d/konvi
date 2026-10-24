@@ -50,7 +50,7 @@ Lo que hace por dentro, tomado de HandBrake:
 - **El audio se copia tal cual** si ya está en el formato pedido; si no, se convierte.
 - Conserva capítulos, metadatos, la rotación del móvil y los 10 bits en H.265/AV1.
 - Con la **tarjeta gráfica** (NVIDIA NVENC o VAAPI de AMD/Intel) H.264 y H.265 van mucho
-  más rápido. Konvi comprueba al arrancar qué funciona de verdad (no basta con que ffmpeg
+  más rápido; viene activada siempre que la haya (desmarcarla vale para esa sesión). Konvi comprueba al arrancar qué funciona de verdad (no basta con que ffmpeg
   lo liste) y, si la tarjeta falla a mitad, vuelve a convertir ese vídeo con el procesador.
 - No deja que el equipo se suspenda mientras convierte.
 
@@ -119,7 +119,7 @@ añaden a la ventana que ya tenías.
 
 | Qué | Dónde |
 |---|---|
-| Ajustes (último perfil, carpeta, tarjeta gráfica) | `~/.config/konvi/konvi.conf` |
+| Ajustes (último perfil, carpeta, tamaño de la ventana) | `~/.config/konvi/konvi.conf` |
 | Tus perfiles | `~/.config/konvi/presets.json` |
 | Qué tarjeta gráfica funciona (se repite si cambia ffmpeg o el kernel) | `~/.cache/konvi/encoders.json` |
 | Errores internos | `~/.cache/konvi/konvi.log` |

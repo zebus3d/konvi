@@ -128,18 +128,18 @@ class MainWindow(QMainWindow):
         self.btn_delete_preset.setAccessibleName("Borrar perfil")
         self.btn_delete_preset.clicked.connect(self._delete_preset)
         row.addWidget(self.btn_delete_preset)
-        row.addSpacing(16)
-        self.hw_check = QCheckBox("Más rápido con la tarjeta gráfica")
-        self.hw_check.setEnabled(False)
-        self.hw_check.setToolTip("Comprobando qué puede hacer la tarjeta gráfica…")
-        self.hw_check.toggled.connect(self._hw_toggled)
-        row.addWidget(self.hw_check)
         root.addLayout(row)
 
         self.description = QLabel()
         self.description.setWordWrap(True)
         self.description.setToolTip("Para qué sirve el perfil elegido.")
         root.addWidget(self.description)
+
+        self.hw_check = QCheckBox("Más rápido con la tarjeta gráfica")
+        self.hw_check.setEnabled(False)
+        self.hw_check.setToolTip("Comprobando qué puede hacer la tarjeta gráfica…")
+        self.hw_check.toggled.connect(self._hw_toggled)
+        root.addWidget(self.hw_check)
 
         # acciones de la lista
         tools = QHBoxLayout()
@@ -375,7 +375,7 @@ class MainWindow(QMainWindow):
                 f"Convierte con la tarjeta gráfica ({kind}): mucho más rápido.\n"
                 "A la misma calidad, el fichero sale algo más grande.\n"
                 "Solo acelera H.264 y H.265; el resto se hace con el procesador.")
-            self.hw_check.setChecked(self.settings.value("use_hw", "false") == "true")
+            self.hw_check.setChecked(True)        # siempre de serie; desmarcarla vale para esta sesión
         else:
             self.hw_check.setEnabled(False)
             self.hw_check.setChecked(False)
@@ -384,7 +384,6 @@ class MainWindow(QMainWindow):
 
     def _hw_toggled(self, on):
         self.runner.use_hardware = on
-        self.settings.setValue("use_hw", "true" if on else "false")
 
     # ------------------------------------------------------------------ carpeta de salida
 
