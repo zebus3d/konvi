@@ -69,26 +69,26 @@ class Category:
     tooltip: str
 
 
-CATEGORIES = (
+CATEGORIES = (  # por orden de uso: lo de todos los días primero
     Category("mp4", "MP4", "video-mp4",
              "MP4: el formato que abre todo\n(móviles, teles, navegadores, Windows, Mac)."),
-    Category("mkv", "MKV", "video-x-matroska",
-             "MKV (Matroska): guarda todas las pistas de audio y los subtítulos.\n"
-             "Ideal para películas y series."),
-    Category("webm", "WebM", "video-webm",
-             "WebM: vídeo para páginas web (VP9 o AV1, audio Opus)."),
-    Category("edit", "Edición", "applications-multimedia",
-             "Para editar en DaVinci Resolve, Premiere o Final Cut:\n"
-             "códecs intermedios (DNxHR, ProRes) que van fluidos en la línea de tiempo.\n"
-             "Ficheros muy grandes."),
-    Category("mpeg", "MPEG / DVD", "media-optical-dvd",
-             "MPEG-2: reproductores antiguos y DVD."),
     Category("web", "Web y redes", "internet-web-browser",
              "YouTube, Vimeo, WhatsApp, Discord, correo..."),
     Category("device", "Móvil y TV", "smartphone",
              "Para verlo en el móvil, la tablet o la tele."),
     Category("audio", "Solo audio", "audio-x-generic",
              "Saca solo el sonido: MP3, M4A, Opus, FLAC o WAV."),
+    Category("edit", "Edición", "applications-multimedia",
+             "Para editar en DaVinci Resolve, Premiere o Final Cut:\n"
+             "códecs intermedios (DNxHR, ProRes) que van fluidos en la línea de tiempo.\n"
+             "Ficheros muy grandes."),
+    Category("mkv", "MKV", "video-x-matroska",
+             "MKV (Matroska): guarda todas las pistas de audio y los subtítulos.\n"
+             "Ideal para películas y series."),
+    Category("webm", "WebM", "video-webm",
+             "WebM: vídeo para páginas web (VP9 o AV1, audio Opus)."),
+    Category("mpeg", "MPEG / DVD", "media-optical-dvd",
+             "MPEG-2: reproductores antiguos y DVD."),
     Category("custom", "Mis perfiles", "bookmarks",
              "Los perfiles que has guardado desde «Ajustes…»."),
 )

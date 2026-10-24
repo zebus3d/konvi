@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
                                QMessageBox, QProgressBar, QPushButton, QSizePolicy, QStackedWidget,
                                QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from ..core import presets
+from ..core import naming, presets
 from ..core.jobs import ACTIVE, EDITABLE, FINISHED, MEDIA_EXTENSIONS, Job, Status, expand_paths
 from ..core.probe import format_duration
 from ..core.progress import format_eta
@@ -19,7 +19,7 @@ from .preset_dialog import PresetDialog
 from .runner import Runner, open_path, reveal
 from .workers import Workers
 
-COL_FILE, COL_INFO, COL_PRESET, COL_STATUS = range(4)
+COL_FILE, COL_PRESET, COL_STATUS = range(3)
 CHOOSE_FOLDER = "__choose__"
 STATUS_ICON = {Status.PROBING: "view-refresh", Status.READY: "", Status.INVALID: "dialog-warning",
                Status.RUNNING: "media-playback-start", Status.PAUSED: "media-playback-pause",
@@ -106,16 +106,20 @@ class MainWindow(QMainWindow):
 
         # perfil
         row = QHBoxLayout()
-        row.addWidget(QLabel("Perfil:"))
+        self.preset_label = QLabel("Perfil:")
+        self.preset_label.setToolTip("El perfil decide cómo se convierte: formato, calidad, tamaño y sonido.\n"
+                                     "Se aplica a todos los vídeos de la lista, o solo a los que selecciones.")
+        row.addWidget(self.preset_label)
         self.preset_combo = QComboBox()
         self.preset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.preset_combo.setMinimumWidth(300)
-        self.preset_combo.setToolTip("Cómo se va a convertir. Pasa el ratón por cada opción para ver qué hace.")
+        self.preset_combo.setToolTip("Elige cómo convertir. Al pasar el ratón por cada opción\n"
+                                     "de la lista verás para qué sirve.")
         self.preset_combo.activated.connect(self._preset_activated)
         row.addWidget(self.preset_combo, 1)
-        self.btn_settings = QPushButton(icon("configure"), "Ajustes…")
-        self.btn_settings.setToolTip("Cambiar la calidad, el tamaño, la resolución o el audio\n"
-                                     "de este perfil y guardarlo en «Mis perfiles».")
+        self.btn_settings = QPushButton(icon("configure"), "Personalizar…")
+        self.btn_settings.setToolTip("Cambiar la calidad, el tamaño final, la resolución o el sonido\n"
+                                     "de este perfil y guardarlo en «Mis perfiles» para la próxima vez.")
         self.btn_settings.clicked.connect(self._edit_preset)
         row.addWidget(self.btn_settings)
         self.btn_delete_preset = QToolButton()
@@ -125,7 +129,7 @@ class MainWindow(QMainWindow):
         self.btn_delete_preset.clicked.connect(self._delete_preset)
         row.addWidget(self.btn_delete_preset)
         row.addSpacing(16)
-        self.hw_check = QCheckBox("Usar la tarjeta gráfica")
+        self.hw_check = QCheckBox("Más rápido con la tarjeta gráfica")
         self.hw_check.setEnabled(False)
         self.hw_check.setToolTip("Comprobando qué puede hacer la tarjeta gráfica…")
         self.hw_check.toggled.connect(self._hw_toggled)
@@ -134,10 +138,8 @@ class MainWindow(QMainWindow):
 
         self.description = QLabel()
         self.description.setWordWrap(True)
-        self.target_label = QLabel()
-        self.target_label.setEnabled(False)          # atenuado: es información, no un control
+        self.description.setToolTip("Para qué sirve el perfil elegido.")
         root.addWidget(self.description)
-        root.addWidget(self.target_label)
 
         # acciones de la lista
         tools = QHBoxLayout()
@@ -146,12 +148,10 @@ class MainWindow(QMainWindow):
                                 "También puedes arrastrarlos a la ventana, o una carpeta entera.")
         self.btn_add.clicked.connect(self._ask_files)
         self.btn_remove = QPushButton(icon("list-remove"), "Quitar")
-        self.btn_remove.setToolTip("Quitar de la lista los seleccionados (Supr).\nNo borra ningún fichero.")
+        self.btn_remove.setToolTip("Quitar de la lista los vídeos seleccionados (Supr).\n"
+                                   "No borra nada del disco.")
         self.btn_remove.clicked.connect(self.remove_selected)
-        self.btn_clear = QPushButton(icon("edit-clear-history"), "Quitar los terminados")
-        self.btn_clear.setToolTip("Quitar de la lista los que ya están convertidos.\nNo borra ningún fichero.")
-        self.btn_clear.clicked.connect(self._clear_finished)
-        for b in (self.btn_add, self.btn_remove, self.btn_clear):
+        for b in (self.btn_add, self.btn_remove):
             tools.addWidget(b)
         tools.addStretch(1)
         root.addLayout(tools)
@@ -164,7 +164,9 @@ class MainWindow(QMainWindow):
         art = QLabel()
         art.setPixmap(icon("video-x-generic").pixmap(96, 96))
         art.setAlignment(Qt.AlignCenter)
+        art.setToolTip("Suelta aquí vídeos, audios o carpetas enteras.")
         title = QLabel("Arrastra aquí tus vídeos")
+        title.setToolTip("Suelta aquí vídeos, audios o carpetas enteras.")
         f = title.font()
         f.setPointSizeF(f.pointSizeF() * 1.5)
         title.setFont(f)
@@ -172,13 +174,21 @@ class MainWindow(QMainWindow):
         hint = QLabel("También carpetas enteras, o pulsa «Añadir vídeos…»")
         hint.setAlignment(Qt.AlignCenter)
         hint.setEnabled(False)
+        hint.setToolTip("De una carpeta se añaden todos los vídeos y audios que haya dentro,\n"
+                        "también los de sus subcarpetas.")
         for w in (art, title, hint):
             ev.addWidget(w)
         ev.addStretch(1)
         self.stack.addWidget(empty)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Archivo", "Detalles", "Perfil", "Estado"])
+        self.tree.setHeaderLabels(["Vídeo", "Perfil", "Estado"])
+        head = self.tree.headerItem()
+        head.setToolTip(COL_FILE, "El vídeo original y sus datos: tamaño de imagen, fotogramas\n"
+                                  "por segundo, formato, sonido y duración.")
+        head.setToolTip(COL_PRESET, "Cómo se va a convertir cada vídeo. Para cambiarlo, selecciona\n"
+                                    "el vídeo y elige otro perfil arriba.")
+        head.setToolTip(COL_STATUS, "Cómo va cada vídeo. Clic derecho para más opciones.")
         self.tree.setRootIsDecorated(False)
         self.tree.setUniformRowHeights(True)
         self.tree.setAlternatingRowColors(True)
@@ -190,17 +200,18 @@ class MainWindow(QMainWindow):
         self.tree.itemSelectionChanged.connect(self._selection_changed)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
         header = self.tree.header()
-        header.setSectionResizeMode(COL_INFO, QHeaderView.Stretch)
+        header.setSectionResizeMode(COL_FILE, QHeaderView.Stretch)
         header.setStretchLastSection(False)
-        self.tree.setColumnWidth(COL_FILE, 300)
-        self.tree.setColumnWidth(COL_PRESET, 200)
-        self.tree.setColumnWidth(COL_STATUS, 240)
+        self.tree.setColumnWidth(COL_PRESET, 230)
+        self.tree.setColumnWidth(COL_STATUS, 250)
         self.stack.addWidget(self.tree)
         root.addWidget(self.stack, 1)
 
         # abajo: dónde guardar, progreso y la acción principal
         bottom = QHBoxLayout()
-        bottom.addWidget(QLabel("Guardar en:"))
+        out_label = QLabel("Guardar en:")
+        out_label.setToolTip("La carpeta donde se guardan los vídeos convertidos.")
+        bottom.addWidget(out_label)
         self.out_combo = QComboBox()
         self.out_combo.setMinimumWidth(260)
         self.out_combo.setToolTip("Dónde se guardan los vídeos convertidos.\n"
@@ -208,13 +219,20 @@ class MainWindow(QMainWindow):
         self._fill_out_combo(self.settings.value("out_folder", "") or "")
         self.out_combo.activated.connect(self._out_activated)
         bottom.addWidget(self.out_combo)
+        self.btn_open_folder = QPushButton(icon("document-open-folder", "folder"), "Abrir carpeta")
+        self.btn_open_folder.setToolTip("Abrir la carpeta con los vídeos que se acaban de convertir.")
+        self.btn_open_folder.clicked.connect(self._open_output_folder)
+        bottom.addWidget(self.btn_open_folder)
         bottom.addStretch(1)
         self.overall_label = QLabel()
+        self.overall_label.setToolTip("Resumen de la lista: cuántos vídeos hay y cuánto duran en total,\n"
+                                      "o cómo va la conversión.")
         bottom.addWidget(self.overall_label)
         self.overall_bar = QProgressBar()
         self.overall_bar.setFixedWidth(200)
         self.overall_bar.setRange(0, 1000)
         self.overall_bar.setTextVisible(False)
+        self.overall_bar.setToolTip("Progreso de todos los vídeos de esta tanda.")
         self.overall_bar.hide()
         bottom.addWidget(self.overall_bar)
         self.btn_pause = QPushButton(icon("media-playback-pause"), "Pausa")
@@ -352,7 +370,6 @@ class MainWindow(QMainWindow):
         self.hardware = self.runner.hardware = hw
         if hw.any:
             kind = "NVIDIA (NVENC)" if hw.nvenc else "VAAPI"
-            self.hw_check.setText(f"Usar la tarjeta gráfica ({'NVIDIA' if hw.nvenc else 'VAAPI'})")
             self.hw_check.setEnabled(True)
             self.hw_check.setToolTip(
                 f"Convierte con la tarjeta gráfica ({kind}): mucho más rápido.\n"
@@ -413,8 +430,6 @@ class MainWindow(QMainWindow):
             self.jobs.append(job)
             item = QTreeWidgetItem()
             item.setData(0, Qt.UserRole, job.id)
-            item.setText(COL_FILE, path.name)
-            item.setToolTip(COL_FILE, str(path))
             item.setIcon(COL_FILE, icon("video-x-generic"))
             self.items[job.id] = item
             self.tree.addTopLevelItem(item)
@@ -448,13 +463,11 @@ class MainWindow(QMainWindow):
         item = self.items.get(job.id)
         if item is None:
             return
-        if job.info:
-            item.setText(COL_INFO, job.info.summary())
-            item.setToolTip(COL_INFO, job.info.summary().replace(" · ", "\n"))
-        elif job.status == Status.PROBING:
-            item.setText(COL_INFO, "Leyendo…")
-        else:
-            item.setText(COL_INFO, "")
+        details = (job.info.summary() if job.info else
+                   "Leyendo…" if job.status == Status.PROBING else "")
+        item.setText(COL_FILE, f"{job.source.name}\n{details}")
+        item.setToolTip(COL_FILE, "\n".join(filter(None, [str(job.source), "",
+                                                         details.replace(" · ", "\n")])))
         item.setText(COL_PRESET, job.preset.name)
         item.setToolTip(COL_PRESET, job.preset.description)
         text, tip = self._status_text(job)
@@ -480,7 +493,10 @@ class MainWindow(QMainWindow):
         if s == Status.PROBING:
             return "Leyendo…", ""
         if s == Status.READY:
-            return ("En cola" if self.runner.running else "Listo"), job.message
+            taken = [j.output for j in self.jobs if j.output and j is not job]
+            where = naming.output_path(job.source, job.preset.container, self.runner.output_folder, taken)
+            tip = f"Se guardará como:\n{where}"
+            return ("En cola" if self.runner.running else "Listo"), "\n\n".join(filter(None, [tip, job.message]))
         if s == Status.INVALID:
             return job.message.split("\n")[0], job.message
         if s == Status.RUNNING:
@@ -565,9 +581,13 @@ class MainWindow(QMainWindow):
     def _context_menu(self, pos):
         item = self.tree.itemAt(pos)
         job = self._job(item.data(0, Qt.UserRole)) if item else None
-        if job is None:
-            return
         menu = QMenu(self)
+        if job is None:
+            menu.addAction(icon("list-add"), "Añadir vídeos…", self._ask_files)
+            clear = menu.addAction(icon("edit-clear-history"), "Quitar los terminados", self._clear_finished)
+            clear.setEnabled(any(j.status == Status.DONE for j in self.jobs))
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+            return
         if job.status == Status.DONE and job.output:
             menu.addAction(icon("media-playback-start"), "Ver el vídeo convertido",
                            lambda: open_path(job.output))
@@ -582,7 +602,16 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         remove = menu.addAction(icon("list-remove"), "Quitar de la lista", self.remove_selected)
         remove.setEnabled(job.status not in ACTIVE)
+        clear = menu.addAction(icon("edit-clear-history"), "Quitar los terminados", self._clear_finished)
+        clear.setEnabled(any(j.status == Status.DONE for j in self.jobs))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _open_output_folder(self):
+        done = [j for j in self.jobs if j.status == Status.DONE and j.output and j.output.exists()]
+        if done:
+            reveal(done[-1].output)
+        elif self.runner.output_folder:
+            open_path(self.runner.output_folder)
 
     def _retry(self, job):
         job.reset()
@@ -657,19 +686,26 @@ class MainWindow(QMainWindow):
         self.btn_pause.setText("Continuar" if self.runner.paused else "Pausa")
         self.btn_pause.setIcon(icon("media-playback-start" if self.runner.paused else "media-playback-pause"))
         self.btn_remove.setEnabled(any(j.status not in ACTIVE for j in self._selected_jobs()))
-        self.btn_clear.setEnabled(any(j.status == Status.DONE for j in self.jobs))
+        if not self.btn_remove.isEnabled():
+            self.btn_remove.setToolTip("Selecciona en la lista los vídeos que quieras quitar.")
+        else:
+            self.btn_remove.setToolTip("Quitar de la lista los vídeos seleccionados (Supr).\n"
+                                       "No borra nada del disco.")
+        self.btn_open_folder.setVisible(not running and any(j.status == Status.DONE for j in self.jobs))
         self.out_combo.setEnabled(not running)
 
+        # a quién se aplica el perfil, dicho en la propia etiqueta
         selected = [j for j in self._selected_jobs() if j.status in EDITABLE]
         editable = [j for j in self.jobs if j.status in EDITABLE]
         if selected:
             n = len(selected)
-            self.target_label.setText(f"Al elegir un perfil se aplica a {'el vídeo seleccionado' if n == 1 else f'los {n} vídeos seleccionados'}.")
+            self.preset_label.setText("Perfil del vídeo seleccionado:" if n == 1 else f"Perfil de los {n} seleccionados:")
+        elif len(editable) > 1:
+            self.preset_label.setText(f"Perfil para los {len(editable)} vídeos:")
         elif editable:
-            self.target_label.setText("Al elegir un perfil se aplica a todos los vídeos de la lista que no se han convertido "
-                                      "(selecciona algunos para cambiar solo esos).")
+            self.preset_label.setText("Perfil para el vídeo:")
         else:
-            self.target_label.setText("Los vídeos que añadas usarán este perfil.")
+            self.preset_label.setText("Perfil:")
 
         if running:
             batch = [j for j in self.jobs if j.id in self._batch]
@@ -689,7 +725,7 @@ class MainWindow(QMainWindow):
             self.overall_label.setText(self._batch_message)
         elif ready:
             total = sum(j.info.duration for j in self.jobs if j.info and j.status == Status.READY)
-            self.overall_label.setText(f"{ready} {'listo' if ready == 1 else 'listos'} · {format_duration(total)}")
+            self.overall_label.setText(f"{ready} {'vídeo' if ready == 1 else 'vídeos'} · {format_duration(total)} en total")
         else:
             self.overall_label.setText("")
 

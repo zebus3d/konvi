@@ -13,7 +13,8 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QElapsedTimer, QSettings, Qt  # noqa: E402
-from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QWidget  # noqa: E402
+from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QComboBox,  # noqa: E402
+                               QLabel, QLineEdit, QSlider, QWidget)
 
 from konvi import app as konvi_app  # noqa: E402
 from konvi.core import command, presets  # noqa: E402
@@ -107,7 +108,9 @@ class UiTests(unittest.TestCase):
         self.choose("web_whatsapp")
         self.assertEqual([j.preset.id for j in self.w.jobs], ["web_whatsapp", "audio_mp3"])
         self.assertEqual(self.w.default_preset.id, "audio_mp3")  # elegir para unos no cambia el de fábrica
-        self.assertIn("seleccionado", self.w.target_label.text())
+        self.assertIn("seleccionado", self.w.preset_label.text())
+        self.w.tree.clearSelection()
+        self.assertEqual(self.w.preset_label.text(), "Perfil para los 2 vídeos:")
 
     def test_convertir(self):
         self.add("corto.mp4", "musica.mp3")
@@ -178,13 +181,32 @@ class UiTests(unittest.TestCase):
         again.workers.wait()
         again.deleteLater()
 
+    def assert_tooltips(self, root):
+        for w in root.findChildren(QWidget):
+            if not w.isVisibleTo(root):
+                continue
+            if isinstance(w, (QAbstractButton, QComboBox, QSlider, QAbstractSpinBox, QLineEdit)) or \
+                    (isinstance(w, QLabel) and (w.text() or w.pixmap() and not w.pixmap().isNull())):
+                if isinstance(w, QLineEdit) and isinstance(w.parent(), (QComboBox, QAbstractSpinBox)):
+                    continue        # el campo interno de un desplegable o un número
+                text = w.text() if hasattr(w, "text") else ""
+                self.assertTrue(w.toolTip(), f"{type(w).__name__} «{text}» sin tooltip")
+
     def test_tooltips(self):
-        for w in self.w.findChildren(QWidget):
-            if isinstance(w, (QAbstractButton, QComboBox)) and w.isVisibleTo(self.w) \
-                    and w.parent() is not None and w.objectName() != "qt_scrollarea_hcontainer":
-                if isinstance(w, QAbstractButton) and w.parent().inherits("QDialogButtonBox"):
-                    continue
-                self.assertTrue(w.toolTip(), f"{type(w).__name__} «{getattr(w, 'text', lambda: '')()}» sin tooltip")
+        self.assert_tooltips(self.w)                       # vacía
+        self.add("corto.mp4")
+        self.assert_tooltips(self.w)                       # con vídeos
+        for p in presets.BUILTIN:
+            with self.subTest(p.id):
+                dlg = PresetDialog(p, self.w)
+                dlg.show()
+                self.assert_tooltips(dlg)
+                dlg.close()
+
+    def test_listo_dice_donde_se_guarda(self):
+        self.add("corto.mp4")
+        tip = self.w.items[self.w.jobs[0].id].toolTip(main_window.COL_STATUS)
+        self.assertIn(str(self.out / "corto.mp4"), tip)
 
     def test_una_sola_ventana(self):
         server = konvi_app.listen(self.w)

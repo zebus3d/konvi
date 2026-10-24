@@ -20,6 +20,14 @@ AUDIO_KBPS = (96, 128, 160, 192, 256, 320, 384)
 TARGET_CODECS = {"h264", "h265", "av1", "vp9"}
 
 
+def _row(form, text, widget):
+    """Fila del formulario cuya etiqueta explica lo mismo que su control."""
+    label = QLabel(text)
+    label.setToolTip(widget.toolTip())
+    label.setBuddy(widget)
+    form.addRow(label, widget)
+
+
 def _select(combo, value):
     i = combo.findData(value)
     combo.setCurrentIndex(i if i >= 0 else 0)
@@ -29,7 +37,7 @@ class PresetDialog(QDialog):
     def __init__(self, preset, parent=None):
         super().__init__(parent)
         self.preset = preset
-        self.setWindowTitle("Ajustes del perfil")
+        self.setWindowTitle("Personalizar el perfil")
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -38,7 +46,7 @@ class PresetDialog(QDialog):
 
         self.name = QLineEdit(preset.name if preset.custom else f"{preset.name} (mío)")
         self.name.setToolTip("Con este nombre aparecerá en «Mis perfiles».")
-        form.addRow("Nombre:", self.name)
+        _row(form, "Nombre:", self.name)
 
         video = preset.video
         steps = QUALITY_STEPS.get(video)
@@ -63,6 +71,13 @@ class PresetDialog(QDialog):
         self.slider.setToolTip("A la izquierda, ficheros más pequeños; a la derecha, más calidad.\n"
                                "«Alta» se ve igual que el original en casi todo.")
         small, big = QLabel("Más pequeño"), QLabel("Mejor calidad")
+        small.setToolTip("Hacia aquí: ficheros más pequeños, con menos calidad.")
+        big.setToolTip("Hacia aquí: más calidad, ficheros más grandes.")
+        self.by_quality.setToolTip("Calidad constante: cada vídeo ocupa lo que necesite para verse así.\n"
+                                   "Es lo recomendado.")
+        self.by_size.setToolTip("Elegir cuánto ocupará el fichero: la calidad se ajusta para caber.\n"
+                                "Útil para enviarlo por correo o a una web con límite de tamaño.")
+        self.quality_label.setToolTip("La calidad elegida.")
         for w in (small, big):
             w.setEnabled(False)       # texto atenuado: es una pista, no un control
         self.size_mb = QDoubleSpinBox()
@@ -124,10 +139,10 @@ class PresetDialog(QDialog):
         self.speed.setToolTip("Cuánto se esfuerza el compresor. La calidad es la misma;\n"
                               "lo que cambia es el tamaño del fichero y lo que tarda.")
         if video:
-            form.addRow("Resolución máxima:", self.resolution)
-            form.addRow("Fotogramas por segundo:", self.fps)
+            _row(form, "Resolución máxima:", self.resolution)
+            _row(form, "Fotogramas por segundo:", self.fps)
             if video in TARGET_CODECS and not preset.lossless:
-                form.addRow("Velocidad:", self.speed)
+                _row(form, "Velocidad:", self.speed)
             if preset.profile == "dvd":
                 for w in (self.resolution, self.fps):
                     w.setEnabled(False)
@@ -145,12 +160,16 @@ class PresetDialog(QDialog):
         self.stereo.setToolTip("Mezcla el sonido envolvente (5.1, 7.1) a dos canales.\n"
                                "Recomendado para móviles, auriculares y redes sociales.")
         if preset.audio in LOSSY_AUDIO:
-            form.addRow("Audio:", self.audio_kbps)
+            _row(form, "Sonido:", self.audio_kbps)
         if preset.audio:
             form.addRow("", self.stereo)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Save).setText("Guardar en Mis perfiles")
+        buttons.button(QDialogButtonBox.Save).setToolTip(
+            "Guarda estos ajustes como un perfil nuevo en «Mis perfiles»\n"
+            "y lo aplica a los vídeos de la lista.")
+        buttons.button(QDialogButtonBox.Cancel).setToolTip("Cerrar sin cambiar nada.")
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
