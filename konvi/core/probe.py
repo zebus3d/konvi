@@ -4,6 +4,8 @@ import json
 import subprocess
 from dataclasses import dataclass, field
 
+from ..i18n import tr
+
 
 @dataclass(frozen=True)
 class VideoInfo:
@@ -44,12 +46,14 @@ class MediaInfo:
                 parts.append(f"{v.fps:.3g} fps")
             parts.append(codec_name(v.codec))
         for a in self.audio[:1]:
-            ch = {1: "mono", 2: "estéreo", 6: "5.1", 8: "7.1"}.get(a.channels, f"{a.channels} canales")
+            ch = {1: tr("mono"), 2: tr("estéreo"), 6: "5.1", 8: "7.1"}.get(
+                a.channels, tr("{n} canales", n=a.channels))
             parts.append(f"{codec_name(a.codec)} {ch}")
         if len(self.audio) > 1:
-            parts.append(f"{len(self.audio)} pistas de audio")
+            parts.append(tr("{n} pistas de audio", n=len(self.audio)))
         if self.subtitles:
-            parts.append(f"{len(self.subtitles)} subtítulos")
+            parts.append(tr("1 subtítulo") if len(self.subtitles) == 1 else
+                         tr("{n} subtítulos", n=len(self.subtitles)))
         if self.duration:
             parts.append(format_duration(self.duration))
         return " · ".join(parts)
@@ -149,13 +153,13 @@ def probe(path, timeout=30):
             ["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
              str(path)], capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as e:
-        raise ProbeError("No se encuentra ffprobe: instala ffmpeg.") from e
+        raise ProbeError(tr("No se encuentra ffprobe: instala ffmpeg.")) from e
     except subprocess.TimeoutExpired as e:
-        raise ProbeError("ffprobe tardó demasiado en leer el fichero.") from e
+        raise ProbeError(tr("ffprobe tardó demasiado en leer el fichero.")) from e
     if out.returncode != 0:
         msg = out.stderr.strip().splitlines()
-        raise ProbeError(msg[-1] if msg else "No es un fichero de vídeo o audio que ffmpeg sepa leer.")
+        raise ProbeError(msg[-1] if msg else tr("No es un fichero de vídeo o audio que ffmpeg sepa leer."))
     info = parse(json.loads(out.stdout or "{}"), str(path))
     if info.video is None and not info.audio:
-        raise ProbeError("No tiene ni vídeo ni audio.")
+        raise ProbeError(tr("No tiene ni vídeo ni audio."))
     return info

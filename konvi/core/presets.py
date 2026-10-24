@@ -90,7 +90,7 @@ CATEGORIES = (  # por orden de uso: lo de todos los días primero
     Category("mpeg", "MPEG / DVD", "media-optical-dvd",
              "MPEG-2: reproductores antiguos y DVD."),
     Category("custom", "Mis perfiles", "bookmarks",
-             "Los perfiles que has guardado desde «Ajustes…»."),
+             "Los perfiles que has guardado desde «Personalizar…»."),
 )
 
 

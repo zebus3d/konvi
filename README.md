@@ -7,6 +7,10 @@ HandBrake por dentro, y con el aspecto nativo de tu escritorio (Plasma, GNOME...
 
 Solo convierte: no recorta, no une vídeos ni añade subtítulos.
 
+Está en **español y en inglés**: si el sistema está en español, sale en español; en
+cualquier otro idioma, en inglés. Las traducciones están en `konvi/i18n_en.py`, y
+`tests/test_i18n.py` falla si algún texto se queda sin traducir.
+
 ## Cómo se usa
 
 1. **Arrastra** vídeos o carpetas enteras a la ventana (o «Añadir vídeos…», o clic derecho
@@ -137,7 +141,7 @@ konvi/ui/     Qt (PySide6) con el estilo del sistema: ventana, cola, «Ajustes�
 Pruebas:
 
 ```bash
-python3 -m unittest tests.test_core              # el motor, en milisegundos
+python3 -m unittest tests.test_core tests.test_i18n   # el motor y las traducciones, en milisegundos
 python3 -m unittest tests.test_real_conversions  # cada perfil con ffmpeg de verdad (~1 min)
 python3 -m unittest tests.test_ui                # la ventana, sin pantalla
 ```

@@ -5,6 +5,7 @@ Actions=konvi;
 X-KDE-Priority=TopLevel
 
 [Desktop Action konvi]
-Name=Convertir con Konvi
+Name=Convert with Konvi
+Name[es]=Convertir con Konvi
 Icon=konvi
 Exec="@KONVI@" %F

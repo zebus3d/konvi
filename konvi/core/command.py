@@ -10,6 +10,8 @@ Reglas tomadas de HandBrake:
 
 from dataclasses import dataclass
 
+from ..i18n import tr
+
 SPEED = {
     "x26x": {"fast": "fast", "medium": "medium", "slow": "slow"},
     "svtav1": {"fast": "8", "medium": "6", "slow": "4"},
@@ -55,15 +57,15 @@ NO_HARDWARE = Hardware()
 def check(info, preset):
     """Motivo por el que no se puede convertir, o None si se puede."""
     if not preset.is_audio_only and info.video is None:
-        return "Este fichero no tiene imagen: elige un perfil de «Solo audio»."
+        return tr("Este fichero no tiene imagen: elige un perfil de «Solo audio».")
     if preset.is_audio_only and not info.audio:
-        return "Este fichero no tiene sonido."
+        return tr("Este fichero no tiene sonido.")
     if preset.target_mb:
         if not info.duration:
-            return "No se sabe cuánto dura, así que no se puede ajustar a un tamaño."
+            return tr("No se sabe cuánto dura, así que no se puede ajustar a un tamaño.")
         if target_video_kbps(info, preset) < 100:
-            return (f"Es demasiado largo para caber en {preset.target_mb:g} MB "
-                    f"con una calidad mínima. Elige otro perfil.")
+            return tr("Es demasiado largo para caber en {mb} MB con una calidad mínima. "
+                      "Elige otro perfil.", mb=f"{preset.target_mb:g}")
     return None
 
 
@@ -194,7 +196,7 @@ def _video_args(info, preset, hw_kind, hardware):
         else:
             args += ["-c:v", "mpeg2video", "-q:v", str(q)]
     else:
-        raise ConvertError(f"Códec de vídeo desconocido: {codec}")
+        raise ConvertError(tr("Códec de vídeo desconocido: {codec}", codec=codec))
 
     if pix:
         args += ["-pix_fmt", pix]

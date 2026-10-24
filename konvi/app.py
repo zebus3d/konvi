@@ -10,7 +10,8 @@ from PySide6.QtCore import QStandardPaths
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from . import __version__
+from . import __version__, i18n
+from .i18n import tr
 
 SERVER = f"konvi-{os.getuid()}"
 
@@ -78,8 +79,8 @@ def install_excepthook(window):
             return
         showing.append(True)
         box = QMessageBox(QMessageBox.Critical, "Konvi",
-                          f"Algo ha fallado dentro de Konvi:\n{value}\n\n"
-                          f"El detalle está en {log}.", parent=window)
+                          tr("Algo ha fallado dentro de Konvi:\n{error}\n\nEl detalle está en {log}.",
+                             error=value, log=log), parent=window)
         box.setDetailedText(text)
         box.exec()
         showing.clear()
@@ -92,6 +93,7 @@ def main(argv=None):
     if "--version" in argv:
         print(f"Konvi {__version__}")
         return 0
+    i18n.set_language(i18n.detect())
     app = QApplication(argv[:1])
     app.setApplicationName("konvi")
     app.setApplicationDisplayName("Konvi")

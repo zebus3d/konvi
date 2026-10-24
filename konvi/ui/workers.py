@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtGui import QImage
 
 from ..core import encoders, probe
+from ..i18n import tr
 
 
 class _Bridge(QObject):
@@ -61,7 +62,7 @@ class Workers(QObject):
             except probe.ProbeError as e:
                 info, error = None, str(e)
             except Exception as e:      # un fichero raro no puede tumbar la app
-                info, error = None, f"No se pudo leer: {e}"
+                info, error = None, tr("No se pudo leer: {error}", error=e)
             self._bridge.probed.emit(job_id, info, error)
         self.pool.start(_Task(work))
 

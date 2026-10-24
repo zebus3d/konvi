@@ -16,7 +16,7 @@ from PySide6.QtCore import QCoreApplication, QElapsedTimer, QSettings, Qt  # noq
 from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QComboBox,  # noqa: E402
                                QLabel, QLineEdit, QSlider, QWidget)
 
-from konvi import app as konvi_app  # noqa: E402
+from konvi import app as konvi_app, i18n  # noqa: E402
 from konvi.core import command, presets  # noqa: E402
 from konvi.core.jobs import Status  # noqa: E402
 from konvi.ui import main_window, workers  # noqa: E402
@@ -55,6 +55,7 @@ class UiTests(unittest.TestCase):
         cls.tmp.cleanup()
 
     def setUp(self):
+        i18n.set_language("es")              # las comprobaciones de texto están en español
         # nada de tocar los ajustes, perfiles ni la tarjeta gráfica del usuario
         self.home = tempfile.TemporaryDirectory()
         self.settings = QSettings(str(Path(self.home.name) / "konvi.ini"), QSettings.IniFormat)

@@ -10,13 +10,18 @@ from PySide6.QtCore import QObject, QProcess, Signal
 from ..core import command, naming
 from ..core.jobs import Status
 from ..core.progress import Progress
+from ..i18n import tr
 
 
 def _error_text(stderr, code):
     """Las últimas líneas útiles de ffmpeg, para el usuario."""
     lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
     useful = [ln for ln in lines if "Conversion failed" not in ln]
-    return "\n".join(useful[-3:]) or f"ffmpeg terminó con el código {code}."
+    return "\n".join(useful[-3:]) or tr("ffmpeg terminó con el código {code}.", code=code)
+
+
+def hardware_fallback_message():
+    return tr("La tarjeta gráfica falló; se ha convertido sin ella.")
 
 
 class Runner(QObject):
@@ -79,7 +84,7 @@ class Runner(QObject):
             return
         job.output, job.used_hardware = final, command.uses_hardware(args)
         job.status, job.fraction, job.eta, job.speed = Status.RUNNING, 0.0, None, 0.0
-        if not job.message.startswith("La tarjeta gráfica"):
+        if job.message != hardware_fallback_message():
             job.message = ""
         self.job, self._tmp, self._stderr, self._cancel = job, tmp, "", False
         self._progress = Progress(job.info.duration)
@@ -113,7 +118,7 @@ class Runner(QObject):
 
     def _on_error(self, error):
         if error == QProcess.FailedToStart and self.job:
-            self._stderr = "No se pudo ejecutar ffmpeg. ¿Está instalado?"
+            self._stderr = tr("No se pudo ejecutar ffmpeg. ¿Está instalado?")
             self._on_finished(-1, QProcess.CrashExit)
 
     def _on_finished(self, code, exit_status):
@@ -141,7 +146,7 @@ class Runner(QObject):
             tmp.unlink(missing_ok=True)
             if job.used_hardware and not self._stopping:
                 # Un driver que falla no debe dejar al usuario sin su vídeo
-                job.message = "La tarjeta gráfica falló; se ha convertido sin ella."
+                job.message = hardware_fallback_message()
                 self._run(job, use_hw=False)
                 return
             job.status, job.output = Status.FAILED, None
@@ -188,7 +193,7 @@ class Runner(QObject):
         if on and self._inhibit is None and shutil.which("systemd-inhibit"):
             self._inhibit = QProcess(self)
             self._inhibit.start("systemd-inhibit", [
-                "--what=sleep:idle", "--who=Konvi", "--why=Convirtiendo vídeos", "--mode=block",
+                "--what=sleep:idle", "--who=Konvi", "--why=" + tr("Convirtiendo vídeos"), "--mode=block",
                 "sleep", "infinity"])
         elif not on and self._inhibit is not None:
             self._inhibit.kill()
