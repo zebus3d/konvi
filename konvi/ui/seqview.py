@@ -237,6 +237,11 @@ class FrameCache(QObject):
         self.inflight = set()
         self.generation = 0
         self.frame_bytes = 0
+        # fotogramas ya revelados con los efectos y la vista de ahora, para que la segunda
+        # vuelta salga de memoria; solo si cabe la secuencia entera, leída y revelada
+        self.developed = {}             # índice -> (cacheKey del fotograma, imagen revelada)
+        self.view_key = None
+        self.developed_bytes = 0
         self._wanted = set()
         self._current = 0
         self._loop = True
@@ -250,6 +255,7 @@ class FrameCache(QObject):
         self.errors.clear()
         self.inflight.clear()
         self.frame_bytes = 0
+        self.forget_developed()
         self._wanted = set()
 
     def loaded_stamps(self):
@@ -267,8 +273,10 @@ class FrameCache(QObject):
         self.generation += 1
         self.pool.clear()
         self.paths = list(paths)
+        dev = {self.paths[i]: d for i, d in self.developed.items()}
         self.images = {i: kept[p][0] for i, p in enumerate(self.paths) if p in kept}
         self.stamps = {i: kept[p][1] for i, p in enumerate(self.paths) if p in kept}
+        self.developed = {i: dev[p] for i, p in enumerate(self.paths) if p in kept and p in dev}
         self.errors.clear()
         self.inflight.clear()
         self._wanted = set()
@@ -277,6 +285,29 @@ class FrameCache(QObject):
         if not self.frame_bytes:
             return self.pool.maxThreadCount()
         return max(4, self.budget // self.frame_bytes)
+
+    def forget_developed(self):
+        self.developed.clear()
+        self.developed_bytes = 0
+
+    def developed_image(self, index, image, view_key, make):
+        """El fotograma `index` revelado con `view_key`: de memoria si ya se reveló así, y si no
+        con `make()`. Cambiar cualquier ajuste (`view_key`) tira todo lo revelado."""
+        if view_key != self.view_key:
+            self.view_key = view_key
+            self.forget_developed()
+        hit = self.developed.get(index)
+        if hit is not None and hit[0] == image.cacheKey():
+            return hit[1]
+        shown = make()
+        if shown is not image:          # un 8 bits sin tocar ya es lo que se pinta
+            nbytes = max(self.developed_bytes, shown.sizeInBytes())
+            if (max(self.frame_bytes, image.sizeInBytes()) + nbytes) * len(self.paths) <= self.budget:
+                self.developed_bytes = nbytes
+                self.developed[index] = (image.cacheKey(), shown)
+            else:
+                self.forget_developed()
+        return shown
 
     def wanted(self, current, loop):
         """Índices a tener en memoria, por prioridad: el actual, los siguientes y unos pocos de atrás."""
@@ -307,6 +338,7 @@ class FrameCache(QObject):
         for i in evicted:
             del self.images[i]
             self.stamps.pop(i, None)
+            self.developed.pop(i, None)
         limit = self.pool.maxThreadCount() * 2
         for i in order:
             if len(self.inflight) >= limit:
@@ -537,6 +569,8 @@ class Viewer(QWidget):
         self.bypass = False         # ver sin efectos (antes / después)
         self.frame = 0              # número del fotograma, para que el grano sea siempre el mismo
         self._developed = None      # (clave, imagen) del último fotograma revelado
+        self.store = None           # FrameCache donde guardar lo revelado de cada fotograma
+        self.index = 0              # índice del fotograma que se ve, en esa caché
         self._drag = None               # encuadre (botón central)
         self._scrub_x = None            # recorrer la secuencia (botón izquierdo)
         self._scrubbing = False         # ya se ha movido lo bastante para no ser un clic
@@ -579,6 +613,12 @@ class Viewer(QWidget):
     def displayed(self):
         """El fotograma tal como se ve, revelado una sola vez aunque se repinte muchas."""
         look = None if self.bypass or not self.look.active() else self.look
+        # silenciado se ve el original sin pasar por lo revelado: si no, la vista «sin
+        # efectos» contaría como un ajuste nuevo y tiraría todo lo revelado con ellos
+        if self.store is not None and not self.bypass:
+            return self.store.developed_image(
+                self.index, self.image, (self.exposure, self.gamma, self.channel, look and look.key()),
+                lambda: develop(self.image, self.exposure, self.gamma, self.channel, look, self.frame))
         key = (self.image.cacheKey(), self.exposure, self.gamma, self.channel,
                look and look.key(), look and self.frame)
         if self._developed is None or self._developed[0] != key:
@@ -665,7 +705,8 @@ class Timeline(QWidget):
         self.setFixedHeight(22)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip(tr("Clic o arrastrar para ir a un fotograma.\n"
-                           "La franja verde es lo que ya está en memoria."))
+                           "La franja verde es lo que ya está en memoria; la azul, lo que\n"
+                           "ya está revelado con los efectos y se reproduce sin recalcular."))
 
     def _x(self, index):
         return 0 if self.count <= 1 else index * (self.width() - 1) / (self.count - 1)
@@ -683,15 +724,17 @@ class Timeline(QWidget):
         if self.count == 0:
             return
         step = w / self.count
-        cached = sorted(self.cache.images)
-        start = prev = None
-        for i in cached + [None]:
-            if start is not None and (i is None or i != prev + 1):
-                p.fillRect(QRectF(start * step, h - 5, (prev - start + 1) * step, 5), QColor("#3fa34d"))
-                start = None
-            if i is not None and start is None:
-                start = i
-            prev = i
+        for indices, y, color in ((self.cache.images, h - 5, "#3fa34d"),
+                                  (self.cache.developed, h - 8, "#4a90d9")):
+            start = prev = None
+            for i in sorted(indices) + [None]:
+                if start is not None and (i is None or i != prev + 1):
+                    p.fillRect(QRectF(start * step, y, (prev - start + 1) * step, 3 if y < h - 5 else 5),
+                               QColor(color))
+                    start = None
+                if i is not None and start is None:
+                    start = i
+                prev = i
         for i in self.cache.errors:
             p.fillRect(QRectF(i * step, h - 5, max(step, 1), 5), QColor("#d04040"))
         x = (self.current + 0.5) * step
@@ -1550,6 +1593,7 @@ class Player(QWidget):
     def _show_current(self):
         image = self.cache.images.get(self.current)
         if image is not None:
+            self.viewer.index = self.current
             self.viewer.set_image(image)
             if not self._sized:
                 self._sized = True

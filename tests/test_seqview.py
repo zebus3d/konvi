@@ -378,6 +378,54 @@ class SeqviewTests(unittest.TestCase):
         cache.frame_bytes = 8 << 20
         self.assertEqual(len(cache.wanted(47, loop=False)), 48)
 
+    def test_revelados_se_reutilizan_hasta_que_cambia_un_ajuste(self):
+        from PySide6.QtGui import QImage
+        cache = seqview.FrameCache()
+        cache.set_paths([Path(f"x{i}.png") for i in range(3)])
+        frame = QImage(64, 32, QImage.Format_RGB32)
+        frame.fill(QColor("gray"))
+        calls = []
+
+        def make():
+            calls.append(1)
+            return frame.copy()
+
+        a = cache.developed_image(0, frame, ("look", 1), make)
+        self.assertIs(cache.developed_image(0, frame, ("look", 1), make), a)    # de memoria
+        self.assertEqual(len(calls), 1)
+        cache.developed_image(0, frame, ("look", 2), make)                      # otro ajuste
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(list(cache.developed), [0])
+        other = frame.copy()                                     # el fichero se volvió a leer
+        cache.developed_image(0, other, ("look", 2), make)
+        self.assertEqual(len(calls), 3)
+        self.assertIs(cache.developed_image(1, frame, ("look", 2), lambda: frame), frame)
+        self.assertNotIn(1, cache.developed)                    # sin revelar no se duplica
+        cache.budget = frame.sizeInBytes() * 3                  # no cabe la secuencia dos veces
+        cache.developed_image(2, frame, ("look", 2), make)
+        self.assertEqual(cache.developed, {})
+
+    def test_silenciar_no_tira_lo_revelado(self):
+        from PySide6.QtGui import QImage
+        cache = seqview.FrameCache()
+        cache.set_paths([Path(f"x{i}.png") for i in range(2)])
+        viewer = seqview.Viewer()
+        viewer.store = cache
+        settings = seqview.fx.default_settings()
+        settings["vignette"]["on"] = True
+        viewer.look.set(settings)
+        frame = QImage(64, 32, QImage.Format_RGB32)
+        frame.fill(QColor("gray"))
+        viewer.index = 0
+        viewer.set_image(frame)
+        developed = viewer.displayed()
+        self.assertIn(0, cache.developed)
+        viewer.bypass = True
+        self.assertIs(viewer.displayed(), frame)                   # silenciado: el original
+        viewer.bypass = False
+        self.assertIn(0, cache.developed)                          # lo revelado sigue ahí
+        self.assertIs(viewer.displayed(), developed)
+
 
 
 

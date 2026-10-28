@@ -388,8 +388,10 @@ EN = {
     "Buscando la secuencia…": "Looking for the sequence…",
     "Cargando %v de %m": "Loading %v of %m",
     "Cargando «{name}» ({n} imágenes)…": "Loading “{name}” ({n} images)…",
-    "Clic o arrastrar para ir a un fotograma.\nLa franja verde es lo que ya está en memoria.":
-        "Click or drag to go to a frame.\nThe green strip is what is already in memory.",
+    "Clic o arrastrar para ir a un fotograma.\nLa franja verde es lo que ya está en memoria; la azul, lo que\n"
+    "ya está revelado con los efectos y se reproduce sin recalcular.":
+        "Click or drag to go to a frame.\nThe green strip is what is already in memory; the blue one, what\n"
+        "is already developed with the effects and plays back without recomputing.",
     "Fotograma actual (número del fichero) / total": "Current frame (file number) / total",
     "Fotograma anterior (←)": "Previous frame (←)",
     "Fotograma siguiente (→)": "Next frame (→)",
