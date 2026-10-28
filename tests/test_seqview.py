@@ -206,6 +206,34 @@ class SeqviewTests(unittest.TestCase):
             self.assertTrue(image.isNull())
             self.assertTrue(error)
 
+    def test_refrescar_anade_los_fotogramas_nuevos(self):
+        from PySide6.QtTest import QTest
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            copy = lambda i: (d / f"r_{i:03d}.png").write_bytes((self.dir / f"shot_{i:04d}.png").read_bytes())
+            for i in range(1, 6):
+                copy(i)
+            # como desde la lista de Konvi: los fotogramas exactos, sin buscar
+            player = seqview.Player([d / f"r_{i:03d}.png" for i in range(1, 6)], fps=24)
+            try:
+                self.assertTrue(wait_until(lambda: len(player.cache.images) == 5))
+                player.refresh()
+                self.assertTrue(wait_until(lambda: player._notice == "No hay fotogramas nuevos"))
+                player.seek(3)
+                kept = player.cache.images[0]
+                for i in range(6, 9):           # el render sigue y deja tres más
+                    copy(i)
+                QTest.keyClick(player, Qt.Key_R, Qt.ControlModifier)
+                self.assertTrue(wait_until(lambda: len(player.paths) == 8))
+                self.assertEqual(player._notice, "3 fotogramas nuevos")
+                self.assertEqual(player.current, 3)                    # el cabezal no se mueve
+                self.assertIs(player.cache.images.get(0), kept)        # lo ya leído no se relee
+                self.assertTrue(wait_until(lambda: len(player.cache.images) == 8))
+                self.assertIn("[1-8]", player.windowTitle())
+            finally:
+                player.close()
+                player.cache.wait()
+
     def test_cache_limitada_por_memoria(self):
         cache = seqview.FrameCache()
         cache.set_paths([Path(f"x{i}.png") for i in range(1000)])

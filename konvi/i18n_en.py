@@ -409,4 +409,14 @@ EN = {
     "caché {loaded}/{n}": "cache {loaded}/{n}",
     "{fps} fps reales": "{fps} real fps",
     "Último fotograma (Fin)": "Last frame (End)",
+    "Buscar fotogramas nuevos (Ctrl+R, F5)\n"
+    "Para ver un render que sigue en marcha sin volver a abrirlo.":
+        "Look for new frames (Ctrl+R, F5)\n"
+        "To follow a render that is still running without reopening it.",
+    "Buscando fotogramas nuevos…": "Looking for new frames…",
+    "No se encuentra la secuencia": "The sequence can't be found",
+    "No hay fotogramas nuevos": "No new frames",
+    "1 fotograma nuevo": "1 new frame",
+    "{n} fotogramas nuevos": "{n} new frames",
+    "Secuencia actualizada": "Sequence updated",
 }

@@ -205,6 +205,19 @@ class FrameCache(QObject):
         self.frame_bytes = 0
         self._wanted = set()
 
+    def remap(self, paths):
+        """Cambia la lista de fotogramas conservando en memoria los que siguen en ella, para no
+        volver a leerlos al refrescar. Los que fallaron se reintentan: en un render en marcha
+        suelen ser fotogramas que aún se estaban escribiendo."""
+        kept = {p: self.images[i] for i, p in enumerate(self.paths) if i in self.images}
+        self.generation += 1
+        self.pool.clear()
+        self.paths = list(paths)
+        self.images = {i: kept[p] for i, p in enumerate(self.paths) if p in kept}
+        self.errors.clear()
+        self.inflight.clear()
+        self._wanted = set()
+
     def capacity(self):
         if not self.frame_bytes:
             return self.pool.maxThreadCount()
@@ -499,6 +512,9 @@ class Player(QWidget):
         self.btn_play = tool_button("play", tr("Reproducir / pausa (Espacio)"), self.toggle_play)
         self.btn_loop = tool_button("loop", tr("Repetir en bucle (L)"), self._set_loop, True)
         self.btn_loop.setChecked(True)
+        self.btn_refresh = tool_button("refresh", tr("Buscar fotogramas nuevos (Ctrl+R, F5)\n"
+                                                     "Para ver un render que sigue en marcha sin volver a abrirlo."),
+                                       self.refresh)
         self.frame_label = QLabel()
         self.frame_label.setFont(QFont("monospace"))
         self.frame_label.setToolTip(tr("Fotograma actual (número del fichero) / total"))
@@ -527,6 +543,14 @@ class Player(QWidget):
         self._finder = _FinderBridge()
         self._finder.found.connect(self._on_found, Qt.QueuedConnection)
         self._find_token = 0
+        self._source = None             # lo que se abrió (imagen, carpeta...), para volver a buscar
+        self._refresher = _FinderBridge()
+        self._refresher.found.connect(self._on_refreshed, Qt.QueuedConnection)
+        self._refresh_token = 0
+        self._notice = ""               # aviso pasajero en la barra de estado
+        self._notice_timer = QTimer(self)
+        self._notice_timer.setSingleShot(True)
+        self._notice_timer.timeout.connect(lambda: self._show_notice(""))
 
         controls = QHBoxLayout()
         controls.setContentsMargins(6, 2, 6, 4)
@@ -535,7 +559,8 @@ class Player(QWidget):
                   self.btn_play,
                   tool_button("next", tr("Fotograma siguiente (→)"), lambda: self.step(1)),
                   tool_button("last", tr("Último fotograma (Fin)"), lambda: self.seek(len(self.paths) - 1)),
-                  self.btn_loop):
+                  self.btn_loop,
+                  self.btn_refresh):
             controls.addWidget(b)
         controls.addSpacing(8)
         controls.addWidget(self.frame_label)
@@ -570,8 +595,11 @@ class Player(QWidget):
 
     # ---- abrir
 
-    def open(self, paths):
+    def open(self, paths, source=None):
         self.pause()
+        self._source = source
+        self._refresh_token += 1        # un refresco pendiente sería de la secuencia anterior
+        self.btn_refresh.setEnabled(True)
         self.paths = list(paths)
         self.cache.set_paths(self.paths)
         self.timeline.count = len(self.paths)
@@ -592,16 +620,56 @@ class Player(QWidget):
         """Abre lo que diga el usuario sin bloquear la ventana mientras se busca la secuencia."""
         self.pause()
         self._find_token += 1
+        self._find_args = list(args)
         self.viewer.set_image(None, tr("Buscando la secuencia…"))
-        QThreadPool.globalInstance().start(_FindTask(self._finder, self._find_token, list(args)))
+        QThreadPool.globalInstance().start(_FindTask(self._finder, self._find_token, self._find_args))
 
     def _on_found(self, token, paths):
         if token != self._find_token:
             return                      # llegó otra petición después
         if paths:
-            self.open(paths)
+            self.open(paths, self._find_args)
         else:
             self.viewer.set_image(None, tr("No hay imágenes que mostrar en la selección"))
+
+    def refresh(self):
+        """Vuelve a buscar la secuencia y añade los fotogramas que hayan aparecido desde que se
+        abrió, sin perder lo que ya está en memoria, el cabezal ni la reproducción."""
+        if not self.paths:
+            return
+        self._refresh_token += 1
+        self.btn_refresh.setEnabled(False)
+        self._show_notice(tr("Buscando fotogramas nuevos…"), 0)
+        args = self._source or [str(self.paths[0])]
+        QThreadPool.globalInstance().start(_FindTask(self._refresher, self._refresh_token, args))
+
+    def _on_refreshed(self, token, paths):
+        if token != self._refresh_token:
+            return                      # entretanto se abrió otra cosa
+        self.btn_refresh.setEnabled(True)
+        if not paths:
+            self._show_notice(tr("No se encuentra la secuencia"))
+            return
+        if paths == self.paths and not self.cache.errors:
+            self._show_notice(tr("No hay fotogramas nuevos"))
+            return
+        added = len(set(paths) - set(self.paths))
+        current = self.paths[self.current]
+        self.paths = list(paths)
+        self.cache.remap(self.paths)
+        self.timeline.count = len(self.paths)
+        self.setWindowTitle(f"{describe(self.paths)} — {APP}")
+        self.seek(self.paths.index(current) if current in self.paths
+                  else min(self.current, len(self.paths) - 1))
+        self._show_notice(tr("1 fotograma nuevo") if added == 1 else
+                          tr("{n} fotogramas nuevos", n=added) if added else
+                          tr("Secuencia actualizada"))
+
+    def _show_notice(self, text, ms=4000):
+        self._notice = text
+        if text and ms:
+            self._notice_timer.start(ms)
+        self._refresh_status()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -796,6 +864,8 @@ class Player(QWidget):
             self.toggle_fullscreen()
         elif key == Qt.Key_O and event.modifiers() & Qt.ControlModifier:
             self._ask_open()
+        elif key == Qt.Key_F5 or (key == Qt.Key_R and event.modifiers() & Qt.ControlModifier):
+            self.refresh()
         elif key == Qt.Key_Escape:
             self.showNormal() if self.isFullScreen() else self.close()
         else:
@@ -817,7 +887,7 @@ class Player(QWidget):
             self.frame_label.setText("")
         self.zoom_label.setText(tr("Ajustar") if self.viewer.zoom is None and self.viewer.image is not None
                                 else f"{self.viewer.zoom_percent()} %")
-        parts = []
+        parts = [self._notice] if self._notice else []
         if self.viewer.image is not None:
             parts.append(f"{self.viewer.image.width()}×{self.viewer.image.height()}")
         if n:
