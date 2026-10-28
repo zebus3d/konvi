@@ -83,7 +83,9 @@ lista como un vídeo (`render_####.png · 250 fotogramas`) y se convierte con cu
   en el visor integrado (el [seqview](https://github.com/zebus3d/dolphin-video-tools), sin
   instalarlo aparte): carga en RAM para ir a tiempo real, zoom con la rueda, arrastrar para
   recorrerla (si estaba en marcha, sigue al soltar), un clic quieto en la imagen o Espacio para
-  pausar y reproducir, ← → (Mayús+← → salta al principio o al final), A para ver el alfa, y
+  pausar y reproducir, ← → (Mayús+← → salta al principio o al final), A para el fondo de cuadros,
+  R / G / B / Mayús+A para ver un canal y C para volver al color, E / Mayús+E para la exposición
+  (en lineal: en un EXR saca las luces quemadas), Y / Mayús+Y para la gamma, 0 para quitarlas, y
   Ctrl+R (o el botón ⟳) para añadir los fotogramas nuevos de un render que sigue en marcha. Lo
   que Qt no sabe leer (EXR sin `kimageformats`) lo lee ffmpeg.
 
@@ -124,25 +126,26 @@ Konvi **no trae ffmpeg ni Qt dentro**: usa los del sistema.
 | **ffmpeg** (con `ffprobe`) | toda la conversión. Tiene que traer `libx264`, `libx265`, `libsvtav1`, `libvpx`, `libopus` y `libmp3lame`; y `zscale` (libzimg) para los EXR |
 | **Python 3.10 o más nuevo** | Konvi está escrito en Python |
 | **PySide6** (Qt 6 para Python) | la ventana |
+| **numpy** | el visor de secuencias (exposición, canales, EXR en coma flotante). Sin él Konvi no arranca |
 | Driver de NVIDIA, o `libva` con el driver de tu gráfica | solo para usar la tarjeta gráfica (opcional) |
 
 ```bash
 # Arch / EndeavourOS / Manjaro (probado)
-sudo pacman -S --needed ffmpeg python pyside6
+sudo pacman -S --needed ffmpeg python pyside6 python-numpy
 #   tarjeta gráfica: NVIDIA ya va con el driver «nvidia»; AMD: libva-mesa-driver; Intel: intel-media-driver
 
 # Fedora: el ffmpeg oficial ("ffmpeg-free") NO trae H.264 ni H.265.
 # Hay que cambiarlo por el de RPM Fusion:
 sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
 sudo dnf swap ffmpeg-free ffmpeg --allowerasing
-sudo dnf install python3-pyside6
+sudo dnf install python3-pyside6 python3-numpy
 
 # Debian 13 / Ubuntu 24.10 o más nuevo
-sudo apt install ffmpeg python3-pyside6.qtwidgets python3-pyside6.qtnetwork
+sudo apt install ffmpeg python3-pyside6.qtwidgets python3-pyside6.qtnetwork python3-numpy
 
 # openSUSE Tumbleweed: como en Fedora, el ffmpeg con H.264/H.265 está en Packman
 sudo zypper install opi && opi codecs
-sudo zypper install python3-pyside6
+sudo zypper install python3-pyside6 python3-numpy
 ```
 
 Solo está probado en Arch; en las otras distros son los nombres de sus paquetes, sin

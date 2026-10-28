@@ -9,16 +9,18 @@ tiempo real. Lo que Qt no sabe leer (EXR sin kimageformats, DPX…) lo lee ffmpe
 import os
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import numpy as np
 
 from PySide6.QtCore import (QElapsedTimer, QObject, QPointF, QRectF, QRunnable, Qt,
                             QThreadPool, QTimer, Signal)
 from PySide6.QtGui import (QBrush, QColor, QColorSpace, QFont, QIcon, QImage, QImageReader,
                            QPainter, QPixmap)
-from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel,
                                QProgressBar, QToolButton, QVBoxLayout, QWidget)
 
-from ..core import command
 from ..i18n import number as fmt_number, tr
 
 APP = "Konvi"
@@ -106,11 +108,10 @@ def memory_budget():
 # ------------------------------------------------------------------ caché
 
 def _ffmpeg_image(path):
-    """Lo que Qt no lee, por ffmpeg (que Konvi ya necesita); los EXR, pasados a sRGB."""
-    vf = command.LINEAR_TO_SRGB.format(pix="gbrapf32le") if path.suffix.lower() == ".exr" else "null"
+    """Lo que Qt no lee (DPX...), por ffmpeg, que Konvi ya necesita."""
     try:
         out = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", str(path), "-frames:v", "1",
-                              "-vf", vf, "-f", "image2pipe", "-c:v", "png", "-"],
+                              "-f", "image2pipe", "-c:v", "png", "-"],
                              capture_output=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
         return QImage(), str(e)
@@ -120,15 +121,42 @@ def _ffmpeg_image(path):
     return image, "" if not image.isNull() else (lines[-1] if lines else tr("No es una imagen que ffmpeg sepa leer."))
 
 
+def _ffmpeg_exr(path):
+    """Un EXR que Qt no lee (sin kimageformats), por ffmpeg y en coma flotante: en lineal,
+    sin recortar, como lo deja kimageformats."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-nostdin", "-i", str(path), "-frames:v", "1",
+                              "-f", "rawvideo", "-pix_fmt", "gbrapf32le", "-"],
+                             capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return QImage(), str(e)
+    err = out.stderr.decode("utf-8", "replace")
+    size = re.findall(r"Video: rawvideo\b.*?, (\d+)x(\d+)\b", err)
+    if not size or not out.stdout:
+        lines = err.strip().splitlines()
+        return QImage(), lines[-1] if lines else tr("No es una imagen que ffmpeg sepa leer.")
+    w, h = map(int, size[-1])
+    g, b, r, a = np.frombuffer(out.stdout, np.float32, count=4 * w * h).reshape(4, h, w)
+    data = np.stack([r, g, b, a], axis=-1).astype(np.float16).tobytes()
+    image = QImage(data, w, h, w * 8, QImage.Format_RGBA16FPx4).copy()
+    image.setColorSpace(QColorSpace(QColorSpace.SRgbLinear))
+    return image, ""
+
+
 def load_image(path):
     reader = QImageReader(str(path))
     reader.setAutoTransform(True)
     image = reader.read()
+    if image.isNull() and path.suffix.lower() == ".exr":
+        image, error = _ffmpeg_exr(path)
+        if image.isNull():
+            return image, error
     if image.isNull():
         image, error = _ffmpeg_image(path)
         if image.isNull():
             return image, error
-    # EXR/HDR vienen en lineal: a sRGB para que se vean como en cualquier visor
+    if image.format() in FLOAT_FORMATS:
+        return as_linear_half(image), ""
     cs = image.colorSpace()
     if cs.isValid() and cs != QColorSpace(QColorSpace.SRgb):
         image.convertToColorSpace(QColorSpace(QColorSpace.SRgb))
@@ -280,6 +308,104 @@ class FrameCache(QObject):
         self.pool.waitForDone()
 
 
+# ------------------------------------------------------------------ vista (exposición, gamma, canales)
+
+FLOAT_FORMATS = {QImage.Format_RGBA16FPx4, QImage.Format_RGBA16FPx4_Premultiplied, QImage.Format_RGBX16FPx4,
+                 QImage.Format_RGBA32FPx4, QImage.Format_RGBA32FPx4_Premultiplied, QImage.Format_RGBX32FPx4}
+CHANNELS = ("rgb", "r", "g", "b", "a")
+EXPOSURE_STEP, GAMMA_STEP = 0.5, 0.1
+
+
+def as_linear_half(image):
+    """EXR/HDR: se guardan en lineal y en coma flotante (media precisión, sin premultiplicar),
+    para que la exposición saque lo que hay por encima de 1 en vez de lo ya recortado."""
+    cs = image.colorSpace()
+    if cs.isValid() and cs != QColorSpace(QColorSpace.SRgbLinear):
+        image.convertToColorSpace(QColorSpace(QColorSpace.SRgbLinear))
+    return image.convertToFormat(QImage.Format_RGBA16FPx4)
+
+
+def is_hdr(image):
+    return image.format() == QImage.Format_RGBA16FPx4
+
+
+def _srgb_encode(v):
+    return np.where(v <= 0.0031308, v * 12.92, 1.055 * np.power(v, 1 / 2.4) - 0.055)
+
+
+_luts = {}
+
+
+def view_lut(hdr, exposure, gamma):
+    """Tabla de cada valor posible del fichero (los 65536 de un half, o los 256 de 8 bits) a
+    8 bits sRGB, con la exposición (en pasos) y la gamma aplicadas en lineal."""
+    key = (hdr, exposure, gamma)
+    if key not in _luts:
+        if hdr:
+            v = np.arange(65536, dtype=np.uint16).view(np.float16).astype(np.float32)
+            v = np.nan_to_num(v, nan=0.0, posinf=65504.0, neginf=0.0)
+        else:
+            v = np.arange(256, dtype=np.float32) / 255
+            v = np.where(v <= 0.04045, v / 12.92, np.power((v + 0.055) / 1.055, 2.4))
+        v = np.power(np.maximum(v * 2.0 ** exposure, 0), 1 / gamma)
+        _luts.clear() if len(_luts) > 64 else None
+        _luts[key] = np.round(_srgb_encode(np.minimum(v, 1)) * 255).astype(np.uint8)
+    return _luts[key]
+
+
+def _alpha_lut():
+    if "alpha" not in _luts:
+        v = np.arange(65536, dtype=np.uint16).view(np.float16).astype(np.float32)
+        _luts["alpha"] = np.round(np.clip(np.nan_to_num(v), 0, 1) * 255).astype(np.uint8)
+    return _luts["alpha"]
+
+
+_bands_pool = ThreadPoolExecutor(max(2, min(8, (os.cpu_count() or 4) // 2)))
+
+
+def _by_bands(height, work):
+    """Reparte el trabajo por franjas de filas entre varios hilos (numpy suelta el GIL): un
+    1080p en coma flotante pasa de ~34 ms a ~11 ms y cabe en lo que dura un fotograma."""
+    step = max(64, -(-height // _bands_pool._max_workers))
+    list(_bands_pool.map(lambda y: work(slice(y, y + step)), range(0, height, step)))
+
+
+def develop(image, exposure=0.0, gamma=1.0, channel="rgb"):
+    """Lo que se pinta: el fotograma con la exposición y la gamma de la vista, y solo el canal
+    elegido (en gris). Una imagen de 8 bits sin tocar nada se devuelve tal cual."""
+    hdr = is_hdr(image)
+    if not hdr and exposure == 0 and gamma == 1 and channel == "rgb":
+        return image
+    has_alpha = image.hasAlphaChannel() and channel == "rgb"
+    if not hdr:
+        image = image.convertToFormat(QImage.Format_RGBA8888)
+    dtype = np.uint16 if hdr else np.uint8
+    w, h, size = image.width(), image.height(), np.dtype(dtype).itemsize
+    src = np.frombuffer(image.constBits(), dtype, count=h * image.bytesPerLine() // size)
+    src = src.reshape(h, image.bytesPerLine() // size)[:, :w * 4].reshape(h, w, 4)
+    lut = _alpha_lut() if channel == "a" else view_lut(hdr, exposure, gamma)
+    out = np.empty((h, w, 4), np.uint8)
+
+    def work(rows):
+        if channel == "rgb":
+            np.take(lut, src[rows], out=out[rows])
+            if not has_alpha:
+                out[rows, :, 3] = 255
+            elif hdr:
+                np.take(_alpha_lut(), src[rows, :, 3], out=out[rows, :, 3])
+            else:
+                out[rows, :, 3] = src[rows, :, 3]
+        else:
+            plane = src[rows, :, "rgba".index(channel)]
+            gray = plane if channel == "a" and not hdr else np.take(lut, plane)
+            out[rows, :, :3] = gray[..., None]
+            out[rows, :, 3] = 255
+
+    _by_bands(h, work)
+    fmt = QImage.Format_ARGB32_Premultiplied if has_alpha else QImage.Format_RGB32
+    return QImage(out.data, w, h, w * 4, QImage.Format_RGBA8888).convertToFormat(fmt)
+
+
 # ------------------------------------------------------------------ widgets
 
 def checker_brush():
@@ -316,6 +442,10 @@ class Viewer(QWidget):
         self.pan = QPointF(0, 0)
         self.checker = False
         self.fast = False           # sin suavizado mientras se reproduce
+        self.exposure = 0.0         # pasos de diafragma, en lineal
+        self.gamma = 1.0
+        self.channel = "rgb"        # o solo "r", "g", "b", "a" (en gris)
+        self._developed = None      # (clave, imagen) del último fotograma revelado
         self._drag = None               # encuadre (botón central)
         self._scrub_x = None            # recorrer la secuencia (botón izquierdo)
         self._scrubbing = False         # ya se ha movido lo bastante para no ser un clic
@@ -355,14 +485,22 @@ class Viewer(QWidget):
         finally:
             p.end()
 
+    def displayed(self):
+        """El fotograma tal como se ve, revelado una sola vez aunque se repinte muchas."""
+        key = (self.image.cacheKey(), self.exposure, self.gamma, self.channel)
+        if self._developed is None or self._developed[0] != key:
+            self._developed = (key, develop(self.image, self.exposure, self.gamma, self.channel))
+        return self._developed[1]
+
     def _paint(self, p):
         p.fillRect(self.rect(), QColor("#1b1b1b"))
         if self.image is not None:
             rect = self.image_rect()
-            if self.checker and self.image.hasAlphaChannel():
+            shown = self.displayed()
+            if self.checker and shown.hasAlphaChannel():
                 p.fillRect(rect, self._checker)
             p.setRenderHint(QPainter.SmoothPixmapTransform, not self.fast)
-            p.drawImage(rect, self.image)
+            p.drawImage(rect, shown)
         if self.message:
             p.setPen(QColor("#e0e0e0"))
             p.drawText(self.rect(), Qt.AlignCenter, self.message)
@@ -539,6 +677,29 @@ class Player(QWidget):
         # al elegir o escribir un valor, el teclado vuelve al visor (Espacio, flechas...)
         self.fps_box.activated.connect(lambda _: self.setFocus())
         self.fps_box.lineEdit().editingFinished.connect(self.setFocus)
+        self.exposure_box = QDoubleSpinBox()
+        self.exposure_box.setRange(-10.0, 10.0)
+        self.exposure_box.setSingleStep(EXPOSURE_STEP)
+        self.exposure_box.setDecimals(1)
+        self.exposure_box.setToolTip(tr("Exposición en pasos, en lineal (E / Mayús+E; 0 la deja a cero).\n"
+                                             "En un EXR saca lo que hay en las luces quemadas."))
+        self.gamma_box = QDoubleSpinBox()
+        self.gamma_box.setRange(0.2, 5.0)
+        self.gamma_box.setSingleStep(GAMMA_STEP)
+        self.gamma_box.setDecimals(1)
+        self.gamma_box.setValue(1.0)
+        self.gamma_box.setToolTip(tr("Gamma de la vista (Y / Mayús+Y; 0 la deja en 1)"))
+        self.channel_box = QComboBox()
+        self.channel_box.addItems(["RGB", "R", "G", "B", "A"])
+        self.channel_box.setToolTip(tr("Canal que se ve: C color, R rojo, G verde, B azul, Mayús+A alfa"))
+        for box in (self.exposure_box, self.gamma_box, self.channel_box):
+            box.setFocusPolicy(Qt.ClickFocus)
+        self.exposure_box.valueChanged.connect(self._view_changed)
+        self.gamma_box.valueChanged.connect(self._view_changed)
+        self.channel_box.currentIndexChanged.connect(self._view_changed)
+        self.exposure_box.editingFinished.connect(self.setFocus)
+        self.gamma_box.editingFinished.connect(self.setFocus)
+        self.channel_box.activated.connect(lambda _: self.setFocus())
         self.zoom_label = QLabel()
         self.zoom_label.setToolTip(tr("Zoom: rueda del ratón; mover la imagen: botón central.\n"
                                       "F = ajustar, 1 = 100 %"))
@@ -577,6 +738,14 @@ class Player(QWidget):
         controls.addSpacing(12)
         controls.addWidget(QLabel("FPS"))
         controls.addWidget(self.fps_box)
+        controls.addSpacing(12)
+        controls.addWidget(QLabel(tr("Exp.")))
+        controls.addWidget(self.exposure_box)
+        controls.addSpacing(8)
+        controls.addWidget(QLabel("γ"))
+        controls.addWidget(self.gamma_box)
+        controls.addSpacing(8)
+        controls.addWidget(self.channel_box)
         controls.addSpacing(12)
         controls.addWidget(self.zoom_label)
         controls.addStretch(1)
@@ -849,6 +1018,25 @@ class Player(QWidget):
 
     # ---- ventana y teclado
 
+    def _view_changed(self, *_):
+        self.viewer.exposure = self.exposure_box.value()
+        self.viewer.gamma = self.gamma_box.value()
+        self.viewer.channel = CHANNELS[self.channel_box.currentIndex()]
+        self.viewer.update()
+
+    def set_channel(self, channel):
+        """Pulsar otra vez la tecla del canal que ya se ve vuelve al color."""
+        if channel == self.viewer.channel:
+            channel = "rgb"
+        self.channel_box.setCurrentIndex(CHANNELS.index(channel))
+
+    def nudge_view(self, box, step):
+        box.setValue(box.value() + step)
+
+    def reset_view(self):
+        self.exposure_box.setValue(0.0)
+        self.gamma_box.setValue(1.0)
+
     def toggle_fullscreen(self):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
 
@@ -870,6 +1058,20 @@ class Player(QWidget):
             self.viewer.fit()
         elif text == "1":
             self.viewer.actual_size()
+        elif text in ("r", "g", "b") and not event.modifiers() & Qt.ControlModifier:
+            self.set_channel(text)
+        elif text == "c":
+            self.set_channel("rgb")
+        elif text == "a" and event.modifiers() & Qt.ShiftModifier:
+            self.set_channel("a")
+        elif text == "e":
+            shift = event.modifiers() & Qt.ShiftModifier
+            self.nudge_view(self.exposure_box, -EXPOSURE_STEP if shift else EXPOSURE_STEP)
+        elif text == "y":
+            shift = event.modifiers() & Qt.ShiftModifier
+            self.nudge_view(self.gamma_box, -GAMMA_STEP if shift else GAMMA_STEP)
+        elif text == "0":
+            self.reset_view()
         elif text == "a":
             self.viewer.checker = not self.viewer.checker
             self.viewer.update()

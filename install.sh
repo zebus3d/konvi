@@ -12,6 +12,7 @@ command -v ffmpeg >/dev/null || missing+=("ffmpeg")
 command -v ffprobe >/dev/null || missing+=("ffprobe (viene con ffmpeg)")
 command -v python3 >/dev/null || missing+=("python3")
 python3 -c "import PySide6" 2>/dev/null || missing+=("PySide6")
+python3 -c "import numpy" 2>/dev/null || missing+=("numpy")
 if [ ${#missing[@]} -gt 0 ]; then
     echo "Faltan: ${missing[*]}" >&2
     echo "Mira «Qué hay que instalar en el sistema» en el README." >&2

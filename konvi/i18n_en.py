@@ -419,4 +419,12 @@ EN = {
     "1 fotograma nuevo": "1 new frame",
     "{n} fotogramas nuevos": "{n} new frames",
     "Secuencia actualizada": "Sequence updated",
+    "Exposición en pasos, en lineal (E / Mayús+E; 0 la deja a cero).\n"
+    "En un EXR saca lo que hay en las luces quemadas.":
+        "Exposure in stops, in linear (E / Shift+E; 0 resets it).\n"
+        "On an EXR it brings back what is in the blown highlights.",
+    "Gamma de la vista (Y / Mayús+Y; 0 la deja en 1)": "View gamma (Y / Shift+Y; 0 resets it to 1)",
+    "Canal que se ve: C color, R rojo, G verde, B azul, Mayús+A alfa":
+        "Channel shown: C color, R red, G green, B blue, Shift+A alpha",
+    "Exp.": "Exp.",
 }
