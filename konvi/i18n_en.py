@@ -631,8 +631,8 @@ EN = {
         'Intensity',
     'Cuánto glow se suma a la imagen.':
         'How much glow is added to the image.',
-    'Solo brilla lo que pasa de aquí. En un PNG el blanco está a unos 2,5 pasos\nsobre el gris medio; en un EXR las luces pueden pasar de ahí.':
-        'Only what goes above this glows. In a PNG white sits about 2.5 stops\nabove middle grey; in an EXR highlights can go beyond that.',
+    'Solo brilla lo que pasa de aquí (0 = el gris medio; por debajo, casi todo).\nEn un PNG el blanco está a unos 2,5 pasos; en un EXR las luces pasan de ahí.':
+        'Only what goes above this glows (0 = middle grey; below it, almost everything).\nIn a PNG white sits about 2.5 stops up; in an EXR highlights go beyond that.',
     'Suavidad del umbral':
         'Threshold softness',
     '0 % = corte en seco; más = empieza a brillar poco a poco, sin escalón.':

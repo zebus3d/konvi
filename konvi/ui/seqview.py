@@ -865,14 +865,16 @@ class LookPanel(QWidget):
         self._section(col, "glow", [
             ("amount", ValueRow(tr("Intensidad"), 0, 400, 5, 0, D["glow"]["amount"], " %",
                                 tr("Cuánto glow se suma a la imagen."), scale=100)),
-            ("threshold", ValueRow(tr("Desde (pasos sobre el gris medio)"), 0, 8, 0.1, 1, D["glow"]["threshold"], " EV",
-                                   tr("Solo brilla lo que pasa de aquí. En un PNG el blanco está a unos 2,5 pasos\n""sobre el gris medio; en un EXR las luces pueden pasar de ahí."))),
+            ("threshold", ValueRow(tr("Desde (pasos sobre el gris medio)"), -3, 8, 0.1, 1, D["glow"]["threshold"], " EV",
+                                   tr("Solo brilla lo que pasa de aquí (0 = el gris medio; por debajo, casi todo).\n"
+                                   "En un PNG el blanco está a unos 2,5 pasos; en un EXR las luces pasan de ahí."))),
             ("knee", ValueRow(tr("Suavidad del umbral"), 0, 100, 5, 0, D["glow"]["knee"], " %",
                               tr("0 % = corte en seco; más = empieza a brillar poco a poco, sin escalón."), scale=100)),
             ("size", ValueRow(tr("Tamaño"), 5, 100, 5, 0, D["glow"]["size"], " %",
                               tr("Hasta dónde puede llegar el halo, en proporción a la imagen."), scale=100)),
             ("falloff", ValueRow(tr("Cola: larga ← → corta"), 1, 4, 0.1, 1, D["glow"]["falloff"], "",
-                                 tr("Cómo cae el halo con la distancia (1/r^p). 2 = como el deslumbramiento de\n""un objetivo real; menos = neblina larga; más = halo recogido."))),
+                                 tr("Cómo cae el halo con la distancia (1/r^p). 2 = como el deslumbramiento de\n"
+                                    "un objetivo real; menos = neblina larga; más = halo recogido."))),
             ("saturation", ValueRow(tr("Saturación"), 0, 200, 5, 0, D["glow"]["saturation"], " %",
                                     tr("Color del halo: 0 % = blanco; 100 % = el de la luz que lo produce."),
                                     scale=100))],

@@ -474,7 +474,7 @@ class LookTests(unittest.TestCase):
         far = lambda g: g[128, 200, 0] / g[128, 132, 0]
         self.assertGreater(far(long_tail), far(short_tail))           # cola larga: llega más lejos
         settings = self.fx.default_settings()
-        settings["glow"].update(on=True, only=True)
+        settings["glow"].update(on=True, only=True, threshold=2.0)    # el 0,5 queda por debajo
         only = self.fx.Look(settings).apply(img.copy())
         self.assertLess(float(only[22, 22, :3].max()), 0.01)   # solo el glow: ni rastro del 0,5 de la imagen
 

@@ -64,7 +64,8 @@ LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)    # Rec.709 / sRGB lineal
 DEFAULTS = {
     "distortion": {"on": False, "amount": -1.0, "fill": True},
     "aberration": {"on": False, "amount": 0.08},
-    "glow": {"on": False, "amount": 0.5, "threshold": 2.0, "knee": 0.5, "size": 0.5, "falloff": 2.0,
+    # umbral a 1 paso sobre el gris: en un PNG (blanco a ~2,5 pasos) se ve; en un EXR, más
+    "glow": {"on": False, "amount": 1.0, "threshold": 1.0, "knee": 0.5, "size": 0.5, "falloff": 2.0,
              "saturation": 1.0, "only": False},
     "vignette": {"on": False, "amount": -1.3, "midpoint": 0.0, "roundness": 0.0, "fit": 0.0},
     "halation": {"on": False, "amount": 0.02, "radius": 0.15, "threshold": 2.0},
@@ -150,7 +151,7 @@ PRESETS = {
         # en la escala de LensTip
         "distortion": {"on": True, "amount": -1.5},
         "aberration": {"on": True, "amount": 0.15},
-        "glow": {"on": True, "amount": 0.3, "threshold": 1.5, "falloff": 1.8},     # sin capas antirreflejo
+        "glow": {"on": True, "amount": 0.4, "falloff": 1.8},     # sin capas antirreflejo
         "vignette": {"on": True, "amount": -1.8}},
     "Réflex full frame, 50 mm f/1.4": {
         "distortion": {"on": True, "amount": -1.2},
@@ -433,7 +434,7 @@ def _karis_half(rgb):
     return out
 
 
-def glow_half(rgb, threshold=2.0, knee=0.5, size=0.5, falloff=2.0, saturation=1.0):
+def glow_half(rgb, threshold=1.0, knee=0.5, size=0.5, falloff=2.0, saturation=1.0):
     """El glow a media resolución (se amplía al sumarlo, en add_glow).
 
     threshold en pasos sobre el gris medio; knee 0 = umbral duro, 1 = muy suave; size, la
@@ -489,7 +490,7 @@ def add_glow(rgba, glow, amount=1.0, only=False):
     by_bands(h, work)
 
 
-def glow_image(rgb, threshold=2.0, knee=0.5, size=0.5, falloff=2.0, saturation=1.0):
+def glow_image(rgb, threshold=1.0, knee=0.5, size=0.5, falloff=2.0, saturation=1.0):
     """Solo el glow, a tamaño completo (para pruebas y para quien lo quiera aparte)."""
     out = np.zeros(rgb.shape[:2] + (4,), np.float32)
     add_glow(out, glow_half(rgb, threshold, knee, size, falloff, saturation))
