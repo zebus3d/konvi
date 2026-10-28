@@ -145,6 +145,7 @@ class SeqviewTests(unittest.TestCase):
             self.assertTrue(player.timer.isActive())             # al soltar, sigue
             player.pause()
             QTest.mousePress(v, Qt.LeftButton, Qt.NoModifier, QPoint(200, 100))
+            QTest.mouseMove(v, QPoint(150, 100))
             QTest.mouseRelease(v, Qt.LeftButton, Qt.NoModifier, QPoint(150, 100))
             self.assertFalse(player.timer.isActive())            # en pausa, se queda en pausa
             player.toggle_play()                                 # y en la línea de tiempo, igual
@@ -152,6 +153,31 @@ class SeqviewTests(unittest.TestCase):
             self.assertFalse(player.timer.isActive())
             QTest.mouseRelease(player.timeline, Qt.LeftButton, Qt.NoModifier, QPoint(10, 5))
             self.assertTrue(player.timer.isActive())
+        finally:
+            player.close()
+            player.cache.wait()
+
+    def test_clic_quieto_en_la_imagen_pausa_y_reproduce(self):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
+        player = seqview.Player(seqview.collect([str(self.dir)]), fps=200)
+        try:
+            player.resize(480, 400)
+            player.show()
+            self.assertTrue(wait_until(lambda: len(player.cache.images) == 24))
+            v = player.viewer
+            player.seek(10)
+            QTest.mouseClick(v, Qt.LeftButton, Qt.NoModifier, QPoint(200, 100))
+            self.assertTrue(player.timer.isActive())             # en pausa, un clic reproduce
+            QTest.mouseClick(v, Qt.LeftButton, Qt.NoModifier, QPoint(200, 100))
+            self.assertFalse(player.timer.isActive())            # reproduciendo, un clic pausa
+            frame = player.current
+            QTest.mousePress(v, Qt.LeftButton, Qt.NoModifier, QPoint(200, 100))
+            QTest.mouseMove(v, QPoint(201, 100))                 # temblor de la mano: sigue siendo clic
+            QTest.mouseRelease(v, Qt.LeftButton, Qt.NoModifier, QPoint(201, 100))
+            self.assertTrue(player.timer.isActive())
+            player.pause()
+            self.assertGreaterEqual(player.current, frame)
         finally:
             player.close()
             player.cache.wait()

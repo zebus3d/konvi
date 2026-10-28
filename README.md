@@ -82,7 +82,8 @@ lista como un vídeo (`render_####.png · 250 fotogramas`) y se convierte con cu
 - Clic derecho → «Reproducir la secuencia» (o doble clic) la reproduce a los fps elegidos
   en el visor integrado (el [seqview](https://github.com/zebus3d/dolphin-video-tools), sin
   instalarlo aparte): carga en RAM para ir a tiempo real, zoom con la rueda, arrastrar para
-  recorrerla (si estaba en marcha, sigue al soltar), Espacio, ← → (Mayús+← → salta al principio o al final), A para ver el alfa, y
+  recorrerla (si estaba en marcha, sigue al soltar), un clic quieto en la imagen o Espacio para
+  pausar y reproducir, ← → (Mayús+← → salta al principio o al final), A para ver el alfa, y
   Ctrl+R (o el botón ⟳) para añadir los fotogramas nuevos de un render que sigue en marcha. Lo
   que Qt no sabe leer (EXR sin `kimageformats`) lo lee ffmpeg.
 

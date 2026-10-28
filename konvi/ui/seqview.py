@@ -15,8 +15,8 @@ from PySide6.QtCore import (QElapsedTimer, QObject, QPointF, QRectF, QRunnable, 
                             QThreadPool, QTimer, Signal)
 from PySide6.QtGui import (QBrush, QColor, QColorSpace, QFont, QIcon, QImage, QImageReader,
                            QPainter, QPixmap)
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel, QProgressBar,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel,
+                               QProgressBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..core import command
 from ..i18n import number as fmt_number, tr
@@ -304,6 +304,7 @@ class Viewer(QWidget):
     scrub_started = Signal()
     scrub_moved = Signal(float)         # píxeles en horizontal desde donde se pulsó
     scrub_finished = Signal()
+    clicked = Signal()              # clic quieto, sin arrastrar
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -317,6 +318,7 @@ class Viewer(QWidget):
         self.fast = False           # sin suavizado mientras se reproduce
         self._drag = None               # encuadre (botón central)
         self._scrub_x = None            # recorrer la secuencia (botón izquierdo)
+        self._scrubbing = False         # ya se ha movido lo bastante para no ser un clic
         self._checker = checker_brush()
 
     def set_image(self, image, message=""):
@@ -381,6 +383,7 @@ class Viewer(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._scrub_x = event.position().x()
+            self._scrubbing = False
             self.setCursor(Qt.SizeHorCursor)
             self.scrub_started.emit()
         elif event.button() == Qt.MiddleButton:
@@ -389,14 +392,21 @@ class Viewer(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._scrub_x is not None:
-            self.scrub_moved.emit(event.position().x() - self._scrub_x)
+            dx = event.position().x() - self._scrub_x
+            if not self._scrubbing and abs(dx) >= QApplication.startDragDistance():
+                self._scrubbing = True
+            if self._scrubbing:
+                self.scrub_moved.emit(dx)
         elif self._drag is not None:
             self.pan = event.position() - self._drag
             self.update()
 
     def mouseReleaseEvent(self, event):
         if self._scrub_x is not None:
-            self.scrub_finished.emit()
+            if self._scrubbing:
+                self.scrub_finished.emit()
+            else:
+                self.clicked.emit()
         self._drag = None
         self._scrub_x = None
         self.unsetCursor()
@@ -591,6 +601,7 @@ class Player(QWidget):
         self.viewer.scrub_started.connect(self._scrub_start)
         self.viewer.scrub_moved.connect(self._scrub_drag)
         self.viewer.scrub_finished.connect(self._scrub_end)
+        self.viewer.clicked.connect(self._click)
         self.open(paths)
 
     # ---- abrir
@@ -698,6 +709,12 @@ class Player(QWidget):
     def _scrub_end(self):
         if self._resume:
             self._resume = False
+            self.toggle_play()
+
+    def _click(self):
+        """Un clic quieto en la imagen: pausa si estaba reproduciendo y reproduce si no."""
+        was_playing, self._resume = self._resume, False
+        if not was_playing:
             self.toggle_play()
 
     def _scrub_drag(self, dx):
