@@ -1,4 +1,4 @@
-"""Efectos de cámara de seqview: distorsión, aberración cromática, viñeteado, halación, grano y
+"""Efectos de cámara de seqview: distorsión, aberración cromática, glow, viñeteado, halación, grano y
 un etalonaje sencillo (balance de blancos, brillo, contraste, gamma, saturación).
 
 Todo trabaja en luz lineal sobre un array float32 (alto, ancho, 4), RGBA sin premultiplicar,
@@ -30,6 +30,13 @@ De dónde salen los valores por defecto:
   En exposición el grano es constante en la parte recta de la curva y crece en el pie, donde
   la curva se aplana: por eso un negativo subexpuesto se ve con más grano. Cada capa tiene su
   propio grano, algo correlado entre capas (colorantes que se solapan, máscaras).
+- Glow: el de Nuke es un solo desenfoque (reduce, desenfoca y amplía), así que da o un halo
+  corto o una neblina gorda. El deslumbramiento real de un objetivo es un núcleo con colas
+  largas, 1/r² y 1/r³ (Spencer et al. 1995, lo que usa el «Fog Glow» de Blender). Aquí, como
+  los «exponential glow» de los compositores y el bloom de Blender y de Call of Duty
+  (Jimenez 2014): una pirámide de desenfoques cada vez el doble de grandes, sumados con pesos
+  2^(i·(2-p)), que dan una cola 1/r^p; umbral con rodilla suave (Unity) y media de Karis al
+  reducir, para que un píxel suelto muy brillante no parpadee.
 - Halación: la luz que atraviesa la emulsión rebota en el soporte y vuelve sobre todo a la
   capa roja (la más cercana al soporte): halo naranja-rojo alrededor de las luces fuertes,
   de unos 0,1-0,2 mm en un VISION3 con su capa antihalo y mucho mayor sin ella (CineStill).
@@ -50,11 +57,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
+LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)    # Rec.709 / sRGB lineal
+
 # ------------------------------------------------------------------ ajustes
 
 DEFAULTS = {
     "distortion": {"on": False, "amount": -1.0, "fill": True},
     "aberration": {"on": False, "amount": 0.08},
+    "glow": {"on": False, "amount": 0.5, "threshold": 2.0, "knee": 0.5, "size": 0.5, "falloff": 2.0,
+             "saturation": 1.0, "only": False},
     "vignette": {"on": False, "amount": -1.3, "midpoint": 0.0, "roundness": 0.0, "fit": 0.0},
     "halation": {"on": False, "amount": 0.02, "radius": 0.15, "threshold": 2.0},
     "grain": {"on": False, "kind": "film", "stock": "250D", "gauge": "35", "iso": 3200,
@@ -62,7 +73,7 @@ DEFAULTS = {
     "grade": {"on": False, "temperature": 6500.0, "tint": 0.0, "exposure": 0.0, "contrast": 1.0,
               "gamma": 1.0, "saturation": 1.0},
 }
-EFFECTS = ("distortion", "aberration", "vignette", "halation", "grain", "grade")
+EFFECTS = ("distortion", "aberration", "glow", "vignette", "halation", "grain", "grade")
 
 # σD × 1000 a media escala (densidad ~1), leídas de las curvas de las fichas de Kodak, en el
 # orden R, G, B. La capa azul (la que forma el amarillo) es siempre la de más grano.
@@ -139,6 +150,7 @@ PRESETS = {
         # en la escala de LensTip
         "distortion": {"on": True, "amount": -1.5},
         "aberration": {"on": True, "amount": 0.15},
+        "glow": {"on": True, "amount": 0.3, "threshold": 1.5, "falloff": 1.8},     # sin capas antirreflejo
         "vignette": {"on": True, "amount": -1.8}},
     "Réflex full frame, 50 mm f/1.4": {
         "distortion": {"on": True, "amount": -1.2},
@@ -348,6 +360,142 @@ class _Warp:
         return out
 
 
+# ------------------------------------------------------------------ glow
+
+def _down2(img):
+    """Mitad de tamaño: media de cada 2×2 (el borde se repite si es impar)."""
+    h, w = img.shape[:2]
+    if h % 2:
+        img = np.concatenate([img, img[-1:]], axis=0)
+    if w % 2:
+        img = np.concatenate([img, img[:, -1:]], axis=1)
+    out = img[0::2, 0::2] + img[1::2, 0::2]
+    out += img[0::2, 1::2]
+    out += img[1::2, 1::2]
+    out *= np.float32(0.25)
+    return out
+
+
+def _blur121(img):
+    """Desenfoque [1 2 1]/4 en las dos direcciones (el borde se repite), sin copias de más."""
+    for ax in (0, 1):
+        a = img
+        out = a * np.float32(2)
+        lo = (slice(None),) * ax
+        out[lo + (slice(1, None),)] += a[lo + (slice(None, -1),)]
+        out[lo + (slice(0, 1),)] += a[lo + (slice(0, 1),)]
+        out[lo + (slice(None, -1),)] += a[lo + (slice(1, None),)]
+        out[lo + (slice(-1, None),)] += a[lo + (slice(-1, None),)]
+        out *= np.float32(0.25)
+        img = out
+    return img
+
+
+def _up2(img, h, w):
+    """Al doble (recortado a h × w) con interpolación lineal: cada píxel nuevo es 3/4 del de
+    abajo y 1/4 del vecino más cercano, que es lo que sale al alinear los centros."""
+    for ax, n in ((0, h), (1, w)):
+        a = img * np.float32(0.75)
+        q = img * np.float32(0.25)
+        lo = (slice(None),) * ax
+        even = a.copy()
+        even[lo + (slice(1, None),)] += q[lo + (slice(None, -1),)]
+        even[lo + (slice(0, 1),)] += q[lo + (slice(0, 1),)]
+        odd = a
+        odd[lo + (slice(None, -1),)] += q[lo + (slice(1, None),)]
+        odd[lo + (slice(-1, None),)] += q[lo + (slice(-1, None),)]
+        shape = list(img.shape)
+        shape[ax] *= 2
+        img = np.stack([even, odd], axis=ax + 1).reshape(shape)[lo + (slice(0, n),)]
+    return img
+
+
+def glow_levels(w, h, size):
+    """Cuántos niveles de la pirámide: con size 1 llega hasta que la imagen se queda en ~1 px."""
+    return int(np.clip(math.floor(math.log2(max(2.0, min(w, h) / 2 * size))), 1, 9))
+
+
+def _karis_half(rgb):
+    """A media resolución con la media de Karis (1 / (1 + luminancia)): un píxel suelto muy
+    brillante pesa menos y no parpadea. Por franjas, en varios hilos."""
+    h, w = rgb.shape[:2]
+    hh, hw = (h + 1) // 2, (w + 1) // 2
+    out = np.empty((hh, hw, 3), np.float32)
+
+    def work(rows):
+        y0, y1 = rows.start * 2, min(rows.stop * 2, h)
+        band = rgb[y0:y1]
+        luma = band[..., 0] * LUMA[0] + band[..., 1] * LUMA[1] + band[..., 2] * LUMA[2]
+        weight = (1 / (1 + np.maximum(luma, 0)))[..., None]
+        out[rows] = _down2(band * weight) / np.maximum(_down2(weight), np.float32(1e-6))
+
+    by_bands(hh, work)
+    return out
+
+
+def glow_half(rgb, threshold=2.0, knee=0.5, size=0.5, falloff=2.0, saturation=1.0):
+    """El glow a media resolución (se amplía al sumarlo, en add_glow).
+
+    threshold en pasos sobre el gris medio; knee 0 = umbral duro, 1 = muy suave; size, la
+    fracción de la imagen que puede llegar a cubrir; falloff p, la caída de la cola (1/r^p):
+    2 = la de un objetivo (Spencer), más = halo más recogido, menos = neblina más larga."""
+    h, w = rgb.shape[:2]
+    half = _karis_half(rgb)
+    # umbral con rodilla suave (la de Unity): sin escalón donde empieza a brillar
+    t = np.float32(0.18 * 2.0 ** threshold)
+    k = np.float32(t * knee + 1e-5)
+    bright = np.maximum(np.maximum(half[..., 0], half[..., 1]), half[..., 2])[..., None]
+    soft = np.clip(bright - t + k, 0, 2 * k) ** 2 / (4 * k)
+    half *= np.maximum(soft, bright - t) / np.maximum(bright, np.float32(1e-6))
+    levels = [_blur121(half)]
+    for _ in range(glow_levels(w, h, size) - 1):
+        if min(levels[-1].shape[:2]) < 4:
+            break
+        levels.append(_blur121(_down2(levels[-1])))
+    weights = np.array([2.0 ** (i * (2 - falloff)) for i in range(len(levels))], np.float32)
+    weights /= weights.sum()
+    acc = levels[-1] * weights[-1]
+    for i in range(len(levels) - 2, -1, -1):
+        lh, lw = levels[i].shape[:2]
+        acc = levels[i] * weights[i] + _up2(acc, lh, lw)
+    if saturation != 1:
+        y = (acc @ LUMA)[..., None]
+        acc = np.maximum(y + (acc - y) * np.float32(saturation), 0)
+    return acc
+
+
+def _up2_table(n, m):
+    """Para ampliar al doble: cada píxel nuevo, 3/4 del suyo y 1/4 del vecino más cercano."""
+    i = np.arange(n) // 2
+    nb = np.clip(i + np.where(np.arange(n) % 2, 1, -1), 0, m - 1)
+    return np.minimum(i, m - 1), nb
+
+
+def add_glow(rgba, glow, amount=1.0, only=False):
+    """Amplía el glow (media resolución) y lo suma a la imagen, por franjas y en varios hilos."""
+    h, w = rgba.shape[:2]
+    rows_i, rows_nb = _up2_table(h, glow.shape[0])
+    cols_i, cols_nb = _up2_table(w, glow.shape[1])
+    a, b = np.float32(0.75 * amount), np.float32(0.25 * amount)
+
+    def work(rows):
+        g = glow[rows_i[rows]] * a + glow[rows_nb[rows]] * b
+        g = g[:, cols_i] * np.float32(0.75) + g[:, cols_nb] * np.float32(0.25)
+        if only:
+            rgba[rows, :, :3] = g
+        else:
+            rgba[rows, :, :3] += g
+
+    by_bands(h, work)
+
+
+def glow_image(rgb, threshold=2.0, knee=0.5, size=0.5, falloff=2.0, saturation=1.0):
+    """Solo el glow, a tamaño completo (para pruebas y para quien lo quiera aparte)."""
+    out = np.zeros(rgb.shape[:2] + (4,), np.float32)
+    add_glow(out, glow_half(rgb, threshold, knee, size, falloff, saturation))
+    return out[..., :3]
+
+
 # ------------------------------------------------------------------ viñeteado
 
 def vignette_gain(w, h, amount, midpoint=0.0, roundness=0.0, fit=0.0):
@@ -474,7 +622,6 @@ _XYZ_TO_RGB = np.linalg.inv(_RGB_TO_XYZ)
 _BRADFORD = np.array([[0.8951, 0.2664, -0.1614],
                       [-0.7502, 1.7135, 0.0367],
                       [0.0389, -0.0685, 1.0296]])
-LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 NEUTRAL_K = 6500.0
 
 
@@ -600,6 +747,11 @@ class Look:
             warp = self._cached(("warp", w, h, tv, ca, dist["fill"]),
                                 lambda: _Warp(w, h, tv, ca, dist["fill"]))
             rgba = warp.apply(rgba)
+        gl = s["glow"]
+        if gl["on"] and (gl["amount"] or gl["only"]):
+            glow = glow_half(rgba[..., :3], gl["threshold"], gl["knee"], gl["size"], gl["falloff"],
+                             gl["saturation"])
+            add_glow(rgba, glow, gl["amount"], gl["only"])
         v = s["vignette"]
         if v["on"] and v["amount"]:
             gain = self._cached(("vig", w, h, v["amount"], v["midpoint"], v["roundness"], v["fit"]),

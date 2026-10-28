@@ -460,6 +460,24 @@ class LookTests(unittest.TestCase):
         self.assertGreater(g, b)
         np.testing.assert_allclose(out[12, 12, :3], 0.5, atol=1e-4)    # sin luces cerca, nada
 
+    def test_glow_alrededor_de_las_luces(self):
+        img = np.zeros((256, 256, 4), np.float32)
+        img[..., 3] = 1
+        img[126:130, 126:130, :3] = 50.0                # una luz muy fuerte (un EXR)
+        img[20:24, 20:24, :3] = 0.5                     # algo por debajo del umbral
+        glow = self.fx.glow_image(img[..., :3])
+        self.assertGreater(glow[128, 150, 0], 0)        # el halo llega lejos de la luz
+        self.assertGreater(glow[128, 140, 0], glow[128, 170, 0])     # y cae con la distancia
+        self.assertLess(glow[22, 22].max(), glow[128, 150].max())
+        long_tail = self.fx.glow_image(img[..., :3], falloff=1.2, size=1.0)
+        short_tail = self.fx.glow_image(img[..., :3], falloff=3.5, size=1.0)
+        far = lambda g: g[128, 200, 0] / g[128, 132, 0]
+        self.assertGreater(far(long_tail), far(short_tail))           # cola larga: llega más lejos
+        settings = self.fx.default_settings()
+        settings["glow"].update(on=True, only=True)
+        only = self.fx.Look(settings).apply(img.copy())
+        self.assertLess(float(only[22, 22, :3].max()), 0.01)   # solo el glow: ni rastro del 0,5 de la imagen
+
     def test_mas_grano_en_el_pie_de_la_curva(self):
         settings = self.fx.default_settings()
         settings["grain"]["on"] = True

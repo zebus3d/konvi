@@ -621,4 +621,30 @@ EN = {
         'Collapse or expand the settings',
     'Volver a los valores por defecto de este efecto':
         'Back to this effect\'s default values',
+    'Glow':
+        'Glow',
+    'Ver solo el glow':
+        'Show only the glow',
+    'Para ajustarlo: se ve solo lo que el glow añade, sobre negro.':
+        'For tuning it: shows only what the glow adds, over black.',
+    'Intensidad':
+        'Intensity',
+    'Cuánto glow se suma a la imagen.':
+        'How much glow is added to the image.',
+    'Solo brilla lo que pasa de aquí. En un PNG el blanco está a unos 2,5 pasos\nsobre el gris medio; en un EXR las luces pueden pasar de ahí.':
+        'Only what goes above this glows. In a PNG white sits about 2.5 stops\nabove middle grey; in an EXR highlights can go beyond that.',
+    'Suavidad del umbral':
+        'Threshold softness',
+    '0 % = corte en seco; más = empieza a brillar poco a poco, sin escalón.':
+        '0 % = hard cut; more = it starts glowing gradually, with no step.',
+    'Tamaño':
+        'Size',
+    'Hasta dónde puede llegar el halo, en proporción a la imagen.':
+        'How far the halo can reach, relative to the image.',
+    'Cola: larga ← → corta':
+        'Tail: long ← → short',
+    'Cómo cae el halo con la distancia (1/r^p). 2 = como el deslumbramiento de\nun objetivo real; menos = neblina larga; más = halo recogido.':
+        'How the halo falls off with distance (1/r^p). 2 = like the glare of a\nreal lens; less = long haze; more = tight halo.',
+    'Color del halo: 0 % = blanco; 100 % = el de la luz que lo produce.':
+        'Halo colour: 0 % = white; 100 % = that of the light producing it.',
 }

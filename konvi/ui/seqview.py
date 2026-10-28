@@ -805,7 +805,7 @@ class LookPanel(QWidget):
     mute_toggled = Signal(bool)
     done_editing = Signal()             # el teclado vuelve al visor
 
-    TITLES = {"distortion": "Distorsión", "aberration": "Aberración cromática",
+    TITLES = {"distortion": "Distorsión", "aberration": "Aberración cromática", "glow": "Glow",
               "vignette": "Viñeteado", "halation": "Halación", "grain": "Grano / ruido",
               "grade": "Color, brillo y contraste"}
 
@@ -858,6 +858,25 @@ class LookPanel(QWidget):
                                 tr("Aberración cromática lateral, en % de la distancia del centro a la esquina\n"
                                 "(la medida de Imatest y LensTip): 0,04 % es baja, 0,08 % entre baja y media,\n"
                                 "0,12 % media. Negativo cambia qué color queda por fuera.")))])
+        self.glow_only = QCheckBox(tr("Ver solo el glow"))
+        self.glow_only.setToolTip(tr("Para ajustarlo: se ve solo lo que el glow añade, sobre negro."))
+        self.glow_only.setFocusPolicy(Qt.NoFocus)
+        self.glow_only.toggled.connect(self._emit)
+        self._section(col, "glow", [
+            ("amount", ValueRow(tr("Intensidad"), 0, 400, 5, 0, D["glow"]["amount"], " %",
+                                tr("Cuánto glow se suma a la imagen."), scale=100)),
+            ("threshold", ValueRow(tr("Desde (pasos sobre el gris medio)"), 0, 8, 0.1, 1, D["glow"]["threshold"], " EV",
+                                   tr("Solo brilla lo que pasa de aquí. En un PNG el blanco está a unos 2,5 pasos\n""sobre el gris medio; en un EXR las luces pueden pasar de ahí."))),
+            ("knee", ValueRow(tr("Suavidad del umbral"), 0, 100, 5, 0, D["glow"]["knee"], " %",
+                              tr("0 % = corte en seco; más = empieza a brillar poco a poco, sin escalón."), scale=100)),
+            ("size", ValueRow(tr("Tamaño"), 5, 100, 5, 0, D["glow"]["size"], " %",
+                              tr("Hasta dónde puede llegar el halo, en proporción a la imagen."), scale=100)),
+            ("falloff", ValueRow(tr("Cola: larga ← → corta"), 1, 4, 0.1, 1, D["glow"]["falloff"], "",
+                                 tr("Cómo cae el halo con la distancia (1/r^p). 2 = como el deslumbramiento de\n""un objetivo real; menos = neblina larga; más = halo recogido."))),
+            ("saturation", ValueRow(tr("Saturación"), 0, 200, 5, 0, D["glow"]["saturation"], " %",
+                                    tr("Color del halo: 0 % = blanco; 100 % = el de la luz que lo produce."),
+                                    scale=100))],
+            extra=self.glow_only)
         self._section(col, "vignette", [
             # se enseña en positivo (pasos que se pierden): a la derecha, más oscuro
             ("amount", ValueRow(tr("Cantidad (pasos que pierde la esquina)"), -2, 4, 0.1, 1, D["vignette"]["amount"], " EV",
@@ -1055,6 +1074,7 @@ class LookPanel(QWidget):
         for (effect, key), row in self.rows.items():
             out[effect][key] = round(row.value(), 4)
         out["distortion"]["fill"] = self.fill.isChecked()
+        out["glow"]["only"] = self.glow_only.isChecked()
         g = out["grain"]
         g["kind"] = "film" if self.kind.currentIndex() == 0 else "digital"
         g["stock"], g["gauge"], g["iso"] = self.stock.currentData(), self.gauge.currentData(), self.iso.currentData()
@@ -1071,6 +1091,7 @@ class LookPanel(QWidget):
         for (effect, key), row in self.rows.items():
             row.set_value(s[effect][key])
         self.fill.setChecked(s["distortion"]["fill"])
+        self.glow_only.setChecked(s["glow"]["only"])
         g = s["grain"]
         self.kind.setCurrentIndex(0 if g["kind"] == "film" else 1)
         for combo, value in ((self.stock, g["stock"]), (self.gauge, g["gauge"]), (self.iso, g["iso"])):

@@ -91,7 +91,8 @@ lista como un vídeo (`render_####.png · 250 fotogramas`) y se convierte con cu
   `kimageformats`) lo lee ffmpeg.
 - En el visor, el botón de la cámara (o V) abre a la derecha los **efectos de cámara**, para
   ver cómo quedaría la secuencia rodada con una cámara de verdad: distorsión, aberración
-  cromática, viñeteado, halación, grano de película o ruido de sensor, y color, brillo y
+  cromática, glow (con cola larga, como los «exponential glow» de Nuke), viñeteado,
+  halación, grano de película o ruido de sensor, y color, brillo y
   contraste. Cada efecto se enciende con su casilla, se pliega con su flecha y vuelve a sus
   valores con su botón; Ctrl+clic en un deslizador lo devuelve a su valor. Arriba hay cámaras
   completas (cine digital, 35 mm 500T o 250D, 16 mm, Super 8, objetivo antiguo, réflex, cámara
