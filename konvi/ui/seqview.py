@@ -19,8 +19,8 @@ import numpy as np
 from PySide6.QtCore import (QElapsedTimer, QObject, QPointF, QRectF, QRunnable, QSettings, Qt,
                             QThreadPool, QTimer, Signal)
 from PySide6.QtGui import (QActionGroup, QBrush, QColor, QColorSpace, QFont, QIcon, QImage,
-                           QImageReader, QPainter, QPixmap)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+                           QImageReader, QPainter, QPainterPath, QPen, QPixmap)
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QFrame, QHBoxLayout, QLabel, QMenu, QProgressBar,
                                QPushButton, QScrollArea, QSlider, QStyle, QStyleOptionSlider, QToolButton,
                                QVBoxLayout, QWidget)
@@ -865,6 +865,368 @@ class ValueRow(QWidget):
         self.blockSignals(False)
 
 
+class CurveGraph(QWidget):
+    """El dibujo de las curvas, cuadrado, con la del canal elegido para editar. Clic en un
+    hueco añade un punto y se arrastra; doble clic o clic derecho en un punto lo quita (los
+    de los extremos solo se mueven). Con Mayús, el punto va diez veces más despacio."""
+
+    changed = Signal()
+    COLORS = {"master": None, "r": "#e05555", "g": "#4fbf5a", "b": "#5a8cf0"}     # general: la del texto
+    PICK = 9                            # a cuántos píxeles de un punto se le coge
+    MARGIN = 6
+    FINE = 0.1
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.curves = {c: [p[:] for p in fx.DEFAULTS["curves"][c]] for c in fx.CURVE_CHANNELS}
+        self.channel = "master"
+        self._drag = None               # índice del punto que se arrastra
+        self._last = None               # dónde estaba el ratón (para ir despacio con Mayús)
+        self._hover = None
+        self.setMinimumSize(160, 160)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.NoFocus)
+
+    def resizeEvent(self, event):
+        if self.height() != self.width():
+            self.setFixedHeight(self.width())
+        super().resizeEvent(event)
+
+    def _rect(self):
+        m = self.MARGIN
+        return QRectF(m, m, self.width() - 2 * m, self.height() - 2 * m)
+
+    def _to_screen(self, x, y):
+        r = self._rect()
+        return QPointF(r.left() + x * r.width(), r.bottom() - y * r.height())
+
+    def _from_screen(self, pos):
+        r = self._rect()
+        return (pos.x() - r.left()) / r.width(), (r.bottom() - pos.y()) / r.height()
+
+    def color(self, channel):
+        return QColor(self.COLORS[channel]) if self.COLORS[channel] else self.palette().text().color()
+
+    def _point_at(self, pos):
+        best, best_d = None, self.PICK
+        for i, (x, y) in enumerate(self.curves[self.channel]):
+            d = (self._to_screen(x, y) - pos).manhattanLength()
+            if d <= best_d:
+                best, best_d = i, d
+        return best
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self._rect()
+        pal = self.palette()
+        p.fillRect(r, pal.base())
+        grid = QColor(pal.text().color())
+        grid.setAlpha(40)
+        p.setPen(QPen(grid, 1))
+        for k in range(1, 4):
+            p.drawLine(QPointF(r.left() + r.width() * k / 4, r.top()), QPointF(r.left() + r.width() * k / 4, r.bottom()))
+            p.drawLine(QPointF(r.left(), r.top() + r.height() * k / 4), QPointF(r.right(), r.top() + r.height() * k / 4))
+        p.setPen(QPen(grid, 1, Qt.DashLine))
+        p.drawLine(r.bottomLeft(), r.topRight())
+        p.setPen(QPen(grid, 1))
+        p.drawRect(r)
+        xs = np.linspace(0, 1, max(64, int(r.width())))
+        # las otras curvas, tenues, solo si se han tocado
+        for c in fx.CURVE_CHANNELS:
+            if c == self.channel or fx.is_identity(self.curves[c]):
+                continue
+            color = self.color(c)
+            color.setAlpha(150)
+            self._draw_curve(p, c, xs, QPen(color, 1))
+        color = self.color(self.channel)
+        self._draw_curve(p, self.channel, xs, QPen(color, 2))
+        p.setPen(QPen(color, 1))
+        for i, (x, y) in enumerate(self.curves[self.channel]):
+            size = 7 if i in (self._drag, self._hover) else 5
+            c = self._to_screen(x, y)
+            p.setBrush(color if i == self._drag else pal.base())
+            p.drawRect(QRectF(c.x() - size / 2, c.y() - size / 2, size, size))
+        p.end()
+
+    def _draw_curve(self, p, channel, xs, pen):
+        ys = fx.curve_eval(self.curves[channel], xs)
+        path = QPainterPath(self._to_screen(xs[0], ys[0]))
+        for x, y in zip(xs[1:], ys[1:]):
+            path.lineTo(self._to_screen(x, y))
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+
+    def mousePressEvent(self, event):
+        pos = event.position()
+        pts = self.curves[self.channel]
+        i = self._point_at(pos)
+        if event.button() == Qt.RightButton:
+            self._remove(i)
+            return
+        if event.button() != Qt.LeftButton:
+            return
+        if i is None:
+            x, y = self._from_screen(pos)
+            x, y = min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0)
+            if any(abs(x - px) < fx.CURVE_MIN_GAP for px, _ in pts):
+                return
+            pts.append([x, y])
+            pts.sort()
+            i = pts.index([x, y])
+            self.changed.emit()
+        self._drag, self._last = i, pos
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position()
+        if self._drag is None:
+            hover = self._point_at(pos)
+            if hover != self._hover:
+                self._hover = hover
+                self.update()
+            return
+        pts = self.curves[self.channel]
+        r = self._rect()
+        speed = self.FINE if event.modifiers() & Qt.ShiftModifier else 1.0
+        dx = (pos.x() - self._last.x()) / r.width() * speed
+        dy = -(pos.y() - self._last.y()) / r.height() * speed
+        self._last = pos
+        i = self._drag
+        lo = pts[i - 1][0] + fx.CURVE_MIN_GAP if i > 0 else 0.0
+        hi = pts[i + 1][0] - fx.CURVE_MIN_GAP if i < len(pts) - 1 else 1.0
+        pts[i] = [min(max(pts[i][0] + dx, lo), hi), min(max(pts[i][1] + dy, 0.0), 1.0)]
+        self.update()
+        self.changed.emit()
+
+    def mouseReleaseEvent(self, event):
+        self._drag = None
+        self.update()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._remove(self._point_at(event.position()))
+
+    def contextMenuEvent(self, event):
+        event.accept()                  # el clic derecho quita un punto, no abre el menú del visor
+
+    def leaveEvent(self, event):
+        self._hover = None
+        self.update()
+
+    def _remove(self, i):
+        pts = self.curves[self.channel]
+        if i is None or i in (0, len(pts) - 1):
+            return
+        del pts[i]
+        self._drag = self._hover = None
+        self.update()
+        self.changed.emit()
+
+
+class CurveEditor(QWidget):
+    """Curvas RGB: la general (los tres canales a la vez) y una por canal, elegidas con los
+    botones de arriba; el botón de deshacer devuelve a la recta la que se está editando."""
+
+    changed = Signal()
+    auto_requested = Signal()
+    NAMES = {"master": "RGB", "r": "R", "g": "G", "b": "B"}
+    TIPS = {"master": "Curva general: los tres canales a la vez (se aplica antes que la de cada canal).",
+            "r": "Curva del rojo.", "g": "Curva del verde.", "b": "Curva del azul."}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.graph = CurveGraph()
+        self.graph.changed.connect(self.changed)
+        self.graph.setToolTip(tr("Eje horizontal: el valor de entrada (como en un PNG: 0 negro, 1 blanco);\n"
+                                 "vertical: el de salida. Clic en un hueco añade un punto; arrastrar lo mueve\n"
+                                 "(con Mayús, despacio); doble clic o clic derecho lo quita.\n"
+                                 "Lo que pasa del blanco en un EXR sigue la pendiente del final de la curva."))
+        row = QHBoxLayout()
+        row.setSpacing(2)
+        self.group = QButtonGroup(self)
+        for c in fx.CURVE_CHANNELS:
+            b = QToolButton()
+            b.setText(self.NAMES[c])
+            b.setCheckable(True)
+            b.setAutoRaise(True)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(tr(self.TIPS[c]))
+            b.setChecked(c == "master")
+            color = CurveGraph.COLORS[c]
+            b.setStyleSheet(f"QToolButton:checked {{ {f'color: {color}; ' if color else ''}font-weight: bold; }}")
+            b.clicked.connect(lambda _=False, ch=c: self.set_channel(ch))
+            self.group.addButton(b)
+            row.addWidget(b)
+        row.addStretch(1)
+        auto = QToolButton()
+        auto.setText("Auto")
+        auto.setAutoRaise(True)
+        auto.setFocusPolicy(Qt.NoFocus)
+        auto.setToolTip(tr("Niveles automáticos, mirando el fotograma que se ve: lleva lo más oscuro y lo\n"
+                           "más claro de cada canal al negro y al blanco (deja fuera el 0,1 % de cada\n"
+                           "extremo). Estira el contraste y quita un tinte de color.\n"
+                           "Cambia las curvas R, G y B y se queda fijo para toda la secuencia: si se\n"
+                           "recalculara en cada fotograma, la imagen parpadearía."))
+        auto.clicked.connect(self.auto_requested)
+        row.addWidget(auto)
+        reset = QToolButton()
+        reset.setIcon(QIcon.fromTheme("edit-clear"))
+        reset.setAutoRaise(True)
+        reset.setFocusPolicy(Qt.NoFocus)
+        reset.setToolTip(tr("Volver a la recta la curva de este canal"))
+        reset.clicked.connect(self.reset_channel)
+        row.addWidget(reset)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        col.addLayout(row)
+        col.addWidget(self.graph)
+
+    def set_channel(self, channel):
+        self.graph.channel = channel
+        self.graph.update()
+
+    def reset_channel(self):
+        self.graph.curves[self.graph.channel] = [[0.0, 0.0], [1.0, 1.0]]
+        self.graph.update()
+        self.changed.emit()
+
+    def curves(self):
+        return {c: [[round(x, 4), round(y, 4)] for x, y in self.graph.curves[c]] for c in fx.CURVE_CHANNELS}
+
+    def set_curves(self, curves):
+        self.graph.curves = {c: [list(p) for p in curves[c]] for c in fx.CURVE_CHANNELS}
+        self.graph.update()
+
+    def set_levels(self, levels):
+        """Las curvas R, G y B que da auto_levels; la general se queda como estaba."""
+        self.graph.curves.update({c: [list(p) for p in pts] for c, pts in levels.items()})
+        self.graph.update()
+        self.changed.emit()
+
+
+class BalanceEditor(QWidget):
+    """Equilibrio de color: tres deslizadores (cian-rojo, magenta-verde, amarillo-azul) que
+    se aplican a la zona elegida arriba, como en el VFB de V-Ray o en Photoshop. Las zonas
+    que tienen algo movido salen en negrita."""
+
+    changed = Signal()
+    ZONES = (("shadows", "Sombras"), ("midtones", "Medios"), ("highlights", "Luces"))
+    ZONE_TIPS = {"shadows": "Lo que se mueva afecta sobre todo a las sombras (y algo a los medios).",
+                 "midtones": "Lo que se mueva afecta sobre todo a los medios tonos.",
+                 "highlights": "Lo que se mueva afecta sobre todo a las luces (y algo a los medios)."}
+    AXES = (("Cian ↔ Rojo", "Hacia la derecha, más rojo; hacia la izquierda, más cian."),
+            ("Magenta ↔ Verde", "Hacia la derecha, más verde; hacia la izquierda, más magenta."),
+            ("Amarillo ↔ Azul", "Hacia la derecha, más azul; hacia la izquierda, más amarillo."))
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.values = {z: [0.0, 0.0, 0.0] for z, _ in self.ZONES}
+        self.zone = "midtones"
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(4)
+        row = QHBoxLayout()
+        row.setSpacing(2)
+        self.group = QButtonGroup(self)
+        self.zone_buttons = {}
+        for zone, name in self.ZONES:
+            b = QToolButton()
+            b.setText(tr(name))
+            b.setCheckable(True)
+            b.setAutoRaise(True)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(tr(self.ZONE_TIPS[zone]) + "\n" + tr("Las zonas se solapan poco a poco: no hay saltos entre ellas."))
+            b.setChecked(zone == self.zone)
+            b.clicked.connect(lambda _=False, z=zone: self.set_zone(z))
+            self.group.addButton(b)
+            self.zone_buttons[zone] = b
+            row.addWidget(b)
+        row.addStretch(1)
+        col.addLayout(row)
+        self.rows = []
+        for i, (label, tip) in enumerate(self.AXES):
+            r = ValueRow(tr(label), -100, 100, 1, 0, 0.0, "",
+                         tr(tip) + "\n" + tr("La luminosidad no cambia: subir un color es quitar su opuesto."),
+                         scale=100)
+            r.changed.connect(lambda v, i=i: self._row_changed(i, v))
+            self.rows.append(r)
+            col.addWidget(r)
+
+    def set_zone(self, zone):
+        self.zone = zone
+        self.zone_buttons[zone].setChecked(True)
+        for r, v in zip(self.rows, self.values[zone]):
+            r.set_value(v)
+
+    def _row_changed(self, i, v):
+        self.values[self.zone][i] = round(v, 4)
+        self._mark()
+        self.changed.emit()
+
+    def _mark(self):
+        for zone, b in self.zone_buttons.items():
+            f = b.font()
+            f.setBold(any(self.values[zone]))
+            b.setFont(f)
+
+    def balance(self):
+        return {z: list(v) for z, v in self.values.items()}
+
+    def set_balance(self, balance):
+        self.values = {z: list(balance[z]) for z, _ in self.ZONES}
+        self.set_zone(self.zone)
+        self._mark()
+
+
+class LutPicker(QWidget):
+    """El fichero .cube del LUT: botón para elegirlo y su nombre (o por qué no se puede usar)."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.path = ""
+        self.button = QPushButton(QIcon.fromTheme("document-open"), tr("Elegir LUT…"))
+        self.button.setFocusPolicy(Qt.NoFocus)
+        self.button.setToolTip(tr("Un LUT .cube (el formato de Resolve, Nuke, el VFB de V-Ray o LuxCore).\n"
+                                  "Se aplica sobre la imagen en sRGB, como la de un PNG: sirve para los LUT de\n"
+                                  "look o de etalonaje, no para los que esperan una imagen en log (LogC, S-Log)."))
+        self.button.clicked.connect(self._choose)
+        self.name = QLabel(tr("Ninguno"))
+        self.name.setWordWrap(True)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        col.addWidget(self.button)
+        col.addWidget(self.name)
+
+    def _choose(self):
+        start = str(Path(self.path).parent) if self.path else str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(self, tr("Elegir LUT"), start,
+                                              tr("LUT (*.cube *.CUBE);;Todos los ficheros (*)"))
+        if path:
+            self.set_path(path)
+            self.changed.emit()
+
+    def set_path(self, path):
+        self.path = path or ""
+        if not self.path:
+            self.name.setText(tr("Ninguno"))
+            self.name.setToolTip("")
+            return
+        try:
+            table, _, _ = fx.load_cube(self.path)
+            n = table.shape[0]
+            kind = tr("3D de {n}", n=n) if table.ndim == 4 else tr("1D de {n}", n=n)
+            self.name.setText(f"{Path(self.path).name}  ({kind})")
+        except (OSError, ValueError) as e:
+            self.name.setText(tr("⚠ {name}: no se puede usar ({error})", name=Path(self.path).name, error=e))
+        self.name.setToolTip(self.path)
+
+
 class LookPanel(QWidget):
     """Barra lateral con los efectos de cámara: cada uno con su casilla para encenderlo y sus
     ajustes debajo (solo se ven los de los que están encendidos), y las cámaras completas
@@ -874,11 +1236,14 @@ class LookPanel(QWidget):
     changed = Signal()
     folding_changed = Signal()          # se ha plegado o desplegado una sección
     mute_toggled = Signal(bool)
+    auto_levels_requested = Signal()
     done_editing = Signal()             # el teclado vuelve al visor
 
     TITLES = {"distortion": "Distorsión", "aberration": "Aberración cromática", "glow": "Glow",
               "vignette": "Viñeteado", "halation": "Halación", "grain": "Grano / ruido",
-              "grade": "Color, brillo y contraste"}
+              "grade": "Color, brillo y contraste", "highlights": "Comprimir luces",
+              "balance": "Equilibrio de color", "curves": "Curvas RGB", "lut": "LUT",
+              "sharpen": "Enfocar / desenfocar"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1034,6 +1399,38 @@ class LookPanel(QWidget):
             ("saturation", ValueRow(tr("Saturación"), 0, 200, 5, 0, 1.0, " %",
                                     tr("0 % = blanco y negro; 100 % = sin cambio. La luminancia no cambia."),
                                     scale=100))])
+        self._section(col, "highlights", [
+            ("knee", ValueRow(tr("Desde (pasos sobre el gris medio)"), -1, 2, 0.1, 1, D["highlights"]["knee"], " EV",
+                              tr("Por debajo de aquí no se toca nada: medios tonos y sombras quedan igual.\n"
+                                 "1,5 = un poco por encima de la mitad del blanco de un PNG."))),
+            ("white", ValueRow(tr("Blanco en (pasos sobre el gris medio)"), 2.6, 12, 0.1, 1, D["highlights"]["white"], " EV",
+                               tr("La luz que queda justo en blanco; lo de más arriba sigue subiendo, pero\n"
+                                  "muy poco. Un PNG llega a unos 2,5 pasos: con un PNG, bájalo hasta ahí o se\n"
+                                  "apaga el blanco. En un render EXR, 5-7 recupera el sol, las lámparas y los\n"
+                                  "reflejos que antes salían recortados (el Filmic de Blender llega a 6,5).")))])
+        self.balance_editor = BalanceEditor()
+        self.balance_editor.changed.connect(self._emit)
+        for r in self.balance_editor.rows:
+            r.spin.editingFinished.connect(self.done_editing)
+        self._section(col, "balance", [], extra=self.balance_editor)
+        self.curve_editor = CurveEditor()
+        self.curve_editor.changed.connect(self._emit)
+        self.curve_editor.auto_requested.connect(self.auto_levels_requested)
+        self._section(col, "curves", [], extra=self.curve_editor)
+        self.lut_picker = LutPicker()
+        self.lut_picker.changed.connect(self._emit)
+        self._section(col, "lut", [
+            ("mix", ValueRow(tr("Mezcla"), 0, 100, 5, 0, D["lut"]["mix"], " %",
+                             tr("Cuánto del LUT: 100 % = entero; menos lo mezcla con la imagen de antes."), scale=100))],
+            extra=self.lut_picker, extra_first=True)
+        self._section(col, "sharpen", [
+            ("amount", ValueRow(tr("Cantidad"), -100, 300, 5, 0, D["sharpen"]["amount"], " %",
+                                tr("Positivo enfoca (máscara de enfoque); negativo desenfoca, y -100 % es el\n"
+                                   "desenfoque entero. Va después del grano: si enfocas, el grano también."),
+                                scale=100)),
+            ("radius", ValueRow(tr("Radio"), 0.3, 20, 0.1, 1, D["sharpen"]["radius"], " px",
+                                tr("Tamaño de los detalles que realza (o del desenfoque), en píxeles de la\n"
+                                   "imagen. Para enfocar un render, 0,5-1,5 px.")))])
         col.addStretch(1)
 
         scroll = QScrollArea()
@@ -1049,8 +1446,9 @@ class LookPanel(QWidget):
             combo.setMinimumContentsLength(14)
         # todas las casillas del mismo ancho (el que pide la más larga, «-25,0 %» con sus
         # flechas), para que los deslizadores queden alineados
-        spin_w = max(row.spin.sizeHint().width() for row in self.rows.values())
-        for row in self.rows.values():
+        value_rows = list(self.rows.values()) + self.balance_editor.rows
+        spin_w = max(row.spin.sizeHint().width() for row in value_rows)
+        for row in value_rows:
             row.spin.setFixedWidth(spin_w)
         content.adjustSize()
         bar = scroll.style().pixelMetric(scroll.style().PixelMetric.PM_ScrollBarExtent)
@@ -1148,6 +1546,9 @@ class LookPanel(QWidget):
             out[effect][key] = round(row.value(), 4)
         out["distortion"]["fill"] = self.fill.isChecked()
         out["glow"]["only"] = self.glow_only.isChecked()
+        out["curves"].update(self.curve_editor.curves())
+        out["balance"].update(self.balance_editor.balance())
+        out["lut"]["path"] = self.lut_picker.path
         g = out["grain"]
         g["kind"] = "film" if self.kind.currentIndex() == 0 else "digital"
         g["stock"], g["gauge"], g["iso"] = self.stock.currentData(), self.gauge.currentData(), self.iso.currentData()
@@ -1165,6 +1566,9 @@ class LookPanel(QWidget):
             row.set_value(s[effect][key])
         self.fill.setChecked(s["distortion"]["fill"])
         self.glow_only.setChecked(s["glow"]["only"])
+        self.curve_editor.set_curves(s["curves"])
+        self.balance_editor.set_balance(s["balance"])
+        self.lut_picker.set_path(s["lut"]["path"])
         g = s["grain"]
         self.kind.setCurrentIndex(0 if g["kind"] == "film" else 1)
         for combo, value in ((self.stock, g["stock"]), (self.gauge, g["gauge"]), (self.iso, g["iso"])):
@@ -1305,6 +1709,7 @@ class Player(QWidget):
         self._resume = False            # al soltar tras arrastrar, seguir reproduciendo
 
         self.viewer = Viewer()
+        self.viewer.store = self.cache
         self.timeline = Timeline(self.cache)
         self.prefs = QSettings("konvi", "konvi")
         self.panel = LookPanel()
@@ -1327,6 +1732,7 @@ class Player(QWidget):
         self.btn_look.setChecked(self.panel.isVisible())
         self.panel.changed.connect(self._look_changed)
         self.panel.mute_toggled.connect(self._mute)
+        self.panel.auto_levels_requested.connect(self.auto_levels)
         self.panel.done_editing.connect(self.setFocus)
         self.btn_refresh = tool_button("refresh", tr("Buscar fotogramas nuevos o cambiados (Ctrl+R, F5)\n"
                                                      "Para ver un render que sigue en marcha sin volver a abrirlo."),
@@ -1729,6 +2135,18 @@ class Player(QWidget):
         self.viewer.look.set(self.panel.settings())
         self.viewer.update()
         self.prefs.setValue("seqview/look", json.dumps(self.panel.settings()))
+
+    def auto_levels(self):
+        """Niveles automáticos sobre el fotograma que se ve, tal como les llega a las curvas:
+        con los demás efectos aplicados (aunque estén silenciados: se verán al quitarlo)."""
+        image = self.cache.images.get(self.current)
+        if image is None:
+            self._show_notice(tr("No hay ningún fotograma cargado para medir"))
+            return
+        settings = self.panel.settings()
+        settings["curves"]["on"] = False
+        rgba = fx.Look(settings).apply(linear_rgba(image), self.viewer.frame)
+        self.panel.curve_editor.set_levels(fx.auto_levels(rgba))
 
     def _mute(self, on):
         self.viewer.bypass = on

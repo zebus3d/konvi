@@ -610,6 +610,151 @@ class LookTests(unittest.TestCase):
         self.assertIs(seqview.develop(image, look=self.fx.Look()), image)   # sin efectos, tal cual
 
 
+    def test_curvas_la_recta_no_cambia_nada(self):
+        rng = np.random.default_rng(3)
+        img = (rng.random((40, 60, 4)) * 3).astype(np.float32)       # con luces de EXR
+        out = self.fx.apply_curves(img.copy(), self.fx.curves_table(self.fx.DEFAULTS["curves"]))
+        np.testing.assert_allclose(out[..., :3], img[..., :3], rtol=1e-4, atol=1e-6)
+
+    def test_curva_pasa_por_sus_puntos_sin_pasarse_de_largo(self):
+        pts = [[0.0, 0.0], [0.3, 0.6], [0.35, 0.62], [1.0, 1.0]]
+        np.testing.assert_allclose(self.fx.curve_eval(pts, [p[0] for p in pts]), [p[1] for p in pts], atol=1e-9)
+        ys = self.fx.curve_eval(pts, np.linspace(0, 1, 501))
+        self.assertTrue((np.diff(ys) >= -1e-12).all())             # monótona: no invierte tonos
+        self.assertLessEqual(ys.max(), 1.0)
+        self.assertAlmostEqual(float(self.fx.curve_eval([[0.2, 0.1], [0.8, 0.9]], 0.0)), 0.1)  # plana fuera
+
+    def test_curvas_en_srgb_y_luces_por_la_pendiente(self):
+        settings = self.fx.default_settings()
+        c = settings["curves"]
+        c["on"] = True
+        c["master"] = [[0.0, 0.0], [0.5, 0.25], [1.0, 1.0]]      # oscurece los medios
+        c["r"] = [[0.0, 0.0], [1.0, 0.5]]                        # el rojo, a la mitad (en sRGB)
+        img = np.zeros((1, 3, 4), np.float32)
+        img[0, 0, :3] = self.fx._decode(0.5)                     # el gris de un PNG a 128
+        img[0, 1, :3] = 1.0
+        img[0, 2, :3] = 4.0                                      # dos pasos sobre el blanco
+        out = self.fx.Look(settings).apply(img.copy())
+        enc = self.fx._encode(out[0])
+        self.assertAlmostEqual(float(enc[0, 1]), 0.25, places=3)
+        self.assertAlmostEqual(float(enc[0, 0]), 0.125, places=3)
+        self.assertAlmostEqual(float(enc[1, 2]), 1.0, places=3)
+        self.assertGreater(float(out[0, 2, 2]), 1.5)             # no se recorta en el blanco
+        self.assertGreater(float(out[0, 2, 2]), float(out[0, 2, 0]))
+
+    def test_comprimir_luces_deja_los_medios_y_llega_al_blanco(self):
+        k, w, _ = self.fx.shoulder_params(1.5, 5.0)
+        img = np.zeros((1, 6, 4), np.float32)
+        img[0, :, 0] = [0.05, 0.18, k, w, 4 * w, 1000.0]
+        out = self.fx.compress_highlights(img.copy(), 1.5, 5.0)[0, :, 0]
+        np.testing.assert_allclose(out[:3], img[0, :3, 0], rtol=1e-6)         # por debajo, igual
+        self.assertAlmostEqual(float(out[3]), 1.0, places=5)                # el blanco, en 1
+        self.assertTrue((np.diff(out) > 0).all())                           # sigue subiendo
+        self.assertLess(float(out[5]), 1.1)                                 # pero muy poco
+        # sin codo en la rodilla: la pendiente justo encima es 1
+        e = 1e-3
+        x = np.array([[[k + e, 0, 0, 0]]], np.float32)
+        self.assertAlmostEqual(float(self.fx.compress_highlights(x, 1.5, 5.0)[0, 0, 0] - k) / e, 1.0, delta=0.01)
+        # rodilla o blanco imposibles (la rodilla por encima de 1): sigue llegando a 1 sin pasarse
+        k, w, _ = self.fx.shoulder_params(4.0, 2.6)
+        self.assertLess(k, 1)
+        self.assertGreater(w, 1)
+
+    def test_niveles_automaticos(self):
+        rng = np.random.default_rng(5)
+        img = np.ones((300, 400, 4), np.float32)
+        enc = rng.uniform(0.2, 0.7, (300, 400, 3))
+        enc[..., 2] = rng.uniform(0.3, 0.9, (300, 400))                     # con tinte azul
+        img[..., :3] = self.fx._decode(enc)
+        levels = self.fx.auto_levels(img)
+        self.assertAlmostEqual(levels["r"][0][0], 0.2, delta=0.01)
+        self.assertAlmostEqual(levels["r"][1][0], 0.7, delta=0.01)
+        self.assertAlmostEqual(levels["b"][0][0], 0.3, delta=0.01)
+        settings = self.fx.default_settings()
+        settings["curves"].update(on=True, **levels)
+        out = self.fx._encode(self.fx.Look(settings).apply(img.copy())[..., :3])
+        for c in range(3):                                   # cada canal, de negro a blanco
+            self.assertLess(np.quantile(out[..., c], 0.002), 0.01)
+            self.assertGreater(np.quantile(out[..., c], 0.998), 0.99)
+        flat = np.full((10, 10, 4), 0.2, np.float32)          # imagen plana: no se toca
+        self.assertEqual(self.fx.auto_levels(flat)["g"], [[0.0, 0.0], [1.0, 1.0]])
+
+    def test_equilibrio_de_color(self):
+        fx = self.fx
+        enc = np.zeros((1, 3, 3), np.float32)
+        enc[0, :, :] = [[0.1] * 3, [0.5] * 3, [0.9] * 3]          # sombra, medio y luz grises
+        bal = {"shadows": [1.0, 0.0, 0.0], "midtones": [0.0, 0.0, 0.0], "highlights": [0.0, 0.0, 0.0]}
+        out = fx.color_balance(enc.copy(), fx.balance_offsets(bal))[0]
+        shift = out[:, 0] - out[:, 1]                               # cuánto más rojo que verde
+        self.assertGreater(shift[0], shift[1])
+        self.assertGreater(shift[1], shift[2])                      # sobre todo en las sombras
+        self.assertGreater(shift[2], 0)
+        np.testing.assert_allclose(out @ fx.LUMA, enc[0] @ fx.LUMA, atol=1e-6)   # la luminosidad, igual
+        zero = {z: [0.0, 0.0, 0.0] for z in fx.BALANCE_ZONES}
+        np.testing.assert_allclose(fx.color_balance(enc.copy(), fx.balance_offsets(zero)), enc)
+        s = fx.merged({"balance": {"shadows": [5, "x", 0], "midtones": [0.5, -2, 0]}})["balance"]
+        self.assertEqual(s["shadows"], [0.0, 0.0, 0.0])             # roto: a cero
+        self.assertEqual(s["midtones"], [0.5, -1.0, 0.0])           # recortado a ±100 %
+
+    def _write_cube(self, text):
+        f = tempfile.NamedTemporaryFile("w", suffix=".cube", delete=False)
+        f.write(text)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        return f.name
+
+    def test_lut_cube(self):
+        fx = self.fx
+        g = np.linspace(0, 1, 5)
+        lines = [f"{r:.6f} {gg:.6f} {(1 - b):.6f}" for b in g for gg in g for r in g]    # invierte el azul
+        path = self._write_cube('TITLE "prueba"\n# comentario\nLUT_3D_SIZE 5\n' + "\n".join(lines) + "\n")
+        lut = fx.load_cube(path)
+        self.assertEqual(lut[0].shape, (5, 5, 5, 3))
+        rng = np.random.default_rng(2)
+        enc = rng.random((20, 30, 3)).astype(np.float32)
+        out = fx.apply_lut(enc.copy(), lut)
+        np.testing.assert_allclose(out[..., :2], enc[..., :2], atol=1e-5)
+        np.testing.assert_allclose(out[..., 2], 1 - enc[..., 2], atol=1e-5)
+        half = fx.apply_lut(enc.copy(), lut, 0.5)                   # mezcla
+        np.testing.assert_allclose(half[..., 2], 0.5, atol=1e-5)
+        one_d = fx.load_cube(self._write_cube("LUT_1D_SIZE 2\n0 0 0\n0.5 1 1\n"))
+        out = fx.apply_lut(np.full((1, 1, 3), 0.5, np.float32), one_d)
+        np.testing.assert_allclose(out[0, 0], [0.25, 0.5, 0.5], atol=1e-6)
+        for bad in ("0 0 0\n", "LUT_3D_SIZE 2\n0 0 0\n", "LUT_1D_SIZE 2\n0 0 0\nhola 1 1\n"):
+            with self.assertRaises(ValueError):
+                fx.load_cube(self._write_cube(bad))
+        # en Look: por la ruta, y si el fichero no está, sin efecto (y sin romperse)
+        settings = fx.default_settings()
+        settings["lut"].update(on=True, path=path)
+        img = np.full((4, 4, 4), 1.0, np.float32)
+        img[..., :3] = fx._decode(np.float32(0.25))
+        out = fx.Look(settings).apply(img.copy())
+        self.assertAlmostEqual(float(fx._encode(out[0, 0, 2])), 0.75, places=4)
+        settings["lut"]["path"] = path + ".no"
+        np.testing.assert_allclose(fx.Look(settings).apply(img.copy()), img)
+
+    def test_enfocar_y_desenfocar(self):
+        fx = self.fx
+        enc = np.zeros((40, 40, 3), np.float32)
+        enc[:, 20:] = 0.6                                           # un borde
+        enc[:, :20] = 0.2
+        sharp = fx.sharpen(enc.copy(), 1.0, 1.0)
+        self.assertGreater(sharp[20, 20, 0], 0.6)                   # el claro sube junto al borde
+        self.assertLess(sharp[20, 19, 0], 0.2)                      # y el oscuro baja
+        self.assertAlmostEqual(float(sharp[20, 5, 0]), 0.2, places=5)    # lejos, igual
+        blurred = fx.sharpen(enc.copy(), -1.0, 2.0)
+        np.testing.assert_allclose(blurred, fx._blur_small(enc, 2.0), atol=1e-6)
+        self.assertLess(blurred[20, 20, 0], 0.6)
+        # el radio grande va por el otro desenfoque y da lo mismo, salvo en los bordes
+        np.testing.assert_allclose(fx._blur_small(enc, 2.9)[8:-8, 8:-8], fx._blur_wide(enc, 2.9)[8:-8, 8:-8], atol=2e-3)
+
+    def test_curvas_rotas_en_el_json_vuelven_a_la_recta(self):
+        s = self.fx.merged({"curves": {"r": "x", "g": [[0.5, 0.5]], "b": [[1, 2], [0, -1]]}})
+        self.assertEqual(s["curves"]["r"], [[0.0, 0.0], [1.0, 1.0]])
+        self.assertEqual(s["curves"]["g"], [[0.0, 0.0], [1.0, 1.0]])
+        self.assertEqual(s["curves"]["b"], [[0.0, 0.0], [1.0, 1.0]])
+
+
 class PanelTests(unittest.TestCase):
     def test_pinchar_en_la_barra_salta_alli(self):
         from PySide6.QtTest import QTest
@@ -684,6 +829,85 @@ class PanelTests(unittest.TestCase):
         finally:
             player.close()
 
+
+    def test_editor_de_curvas(self):
+        from PySide6.QtTest import QTest
+        from PySide6.QtCore import QPoint
+        panel = seqview.LookPanel()
+        panel.boxes["curves"].setChecked(True)
+        panel.set_expanded("curves", True)
+        panel.show()
+        QCoreApplication.processEvents()
+        graph = panel.curve_editor.graph
+        self.assertEqual(graph.width(), graph.height())
+        r = graph._rect()
+        at = lambda x, y: graph._to_screen(x, y).toPoint()
+        QTest.mouseClick(graph, Qt.LeftButton, pos=at(0.5, 0.75))          # punto nuevo
+        pts = panel.settings()["curves"]["master"]
+        self.assertEqual(len(pts), 3)
+        self.assertAlmostEqual(pts[1][1], 0.75, delta=2 / r.height())
+        QTest.mouseClick(graph, Qt.RightButton, pos=at(*pts[1]))         # y se quita
+        self.assertEqual(panel.settings()["curves"]["master"], [[0.0, 0.0], [1.0, 1.0]])
+        QTest.mouseClick(graph, Qt.RightButton, pos=at(0, 0))            # los extremos no
+        self.assertEqual(len(panel.settings()["curves"]["master"]), 2)
+        panel.curve_editor.group.buttons()[1].click()                    # canal rojo
+        QTest.mouseClick(graph, Qt.LeftButton, pos=at(0.5, 0.2))
+        s = panel.settings()
+        self.assertEqual(len(s["curves"]["r"]), 3)
+        self.assertEqual(len(s["curves"]["master"]), 2)
+        other = seqview.LookPanel()
+        other.set_settings(s)
+        self.assertEqual(other.settings()["curves"], s["curves"])         # ida y vuelta
+        panel.reset_effect("curves")
+        self.assertEqual(panel.settings()["curves"], dict(seqview.fx.DEFAULTS["curves"], on=True))
+        panel.close()
+        other.close()
+
+    def test_equilibrio_y_lut_en_el_panel(self):
+        panel = seqview.LookPanel()
+        ed = panel.balance_editor
+        ed.set_zone("shadows")
+        ed.rows[0].set_value(0.4, emit=True)
+        ed.set_zone("highlights")
+        self.assertEqual(ed.rows[0].value(), 0.0)                  # cada zona, sus valores
+        ed.rows[2].set_value(-0.3, emit=True)
+        s = panel.settings()
+        self.assertEqual(s["balance"]["shadows"], [0.4, 0.0, 0.0])
+        self.assertEqual(s["balance"]["highlights"], [0.0, 0.0, -0.3])
+        self.assertTrue(ed.zone_buttons["shadows"].font().bold())
+        self.assertFalse(ed.zone_buttons["midtones"].font().bold())
+        s["lut"]["path"] = "/no/existe.cube"
+        other = seqview.LookPanel()
+        other.set_settings(s)
+        self.assertEqual(other.settings()["balance"], s["balance"])  # ida y vuelta
+        self.assertEqual(other.settings()["lut"]["path"], "/no/existe.cube")
+        self.assertIn("no se puede usar", other.lut_picker.name.text())
+        panel.reset_effect("balance")
+        self.assertEqual(panel.settings()["balance"], dict(seqview.fx.DEFAULTS["balance"], on=False))
+        panel.close()
+        other.close()
+
+    def test_boton_auto_de_las_curvas(self):
+        from PySide6.QtGui import QImage
+        player = seqview.Player([])
+        try:
+            image = QImage(64, 32, QImage.Format_RGB32)
+            image.fill(QColor(20, 40, 90))
+            for x in range(32, 64):                         # la mitad derecha, más clara
+                for y in range(32):
+                    image.setPixelColor(x, y, QColor(200, 180, 230))
+            player.cache.images[0] = image
+            player.current = 0
+            player.panel.boxes["curves"].setChecked(True)
+            buttons = [b for b in player.panel.curve_editor.findChildren(seqview.QToolButton) if b.text() == "Auto"]
+            self.assertEqual(len(buttons), 1)
+            buttons[0].click()
+            curves = player.panel.settings()["curves"]
+            self.assertEqual(curves["master"], [[0.0, 0.0], [1.0, 1.0]])    # la general, igual
+            self.assertNotEqual(curves["r"], [[0.0, 0.0], [1.0, 1.0]])
+            self.assertEqual(player.viewer.look.settings["curves"]["r"], curves["r"])   # ya se ve
+        finally:
+            player.close()
 
 class MuteTests(unittest.TestCase):
     def test_m_silencia_y_vuelve_a_poner_los_efectos(self):

@@ -30,6 +30,10 @@ def data_keys():
     from konvi.core import look
     from konvi.ui import seqview
     keys |= set(look.PRESETS) | set(seqview.LookPanel.TITLES.values())
+    keys |= set(seqview.CurveEditor.TIPS.values()) | set(seqview.BalanceEditor.ZONE_TIPS.values())
+    keys |= {name for _, name in seqview.BalanceEditor.ZONES}
+    for label, tip in seqview.BalanceEditor.AXES:
+        keys |= {label, tip}
     return keys
 
 

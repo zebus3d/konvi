@@ -649,4 +649,90 @@ EN = {
         'How the halo falls off with distance (1/r^p). 2 = like the glare of a\nreal lens; less = long haze; more = tight halo.',
     'Color del halo: 0 % = blanco; 100 % = el de la luz que lo produce.':
         'Halo colour: 0 % = white; 100 % = that of the light producing it.',
+    'Blanco en (pasos sobre el gris medio)':
+        'White at (stops above middle grey)',
+    'Comprimir luces':
+        'Highlight compression',
+    'Curvas RGB':
+        'RGB curves',
+    'Cuánto del LUT: 100 % = entero; menos lo mezcla con la imagen de antes.':
+        'How much of the LUT: 100 % = all of it; less blends it with the image before.',
+    'Eje horizontal: el valor de entrada (como en un PNG: 0 negro, 1 blanco);\nvertical: el de salida. Clic en un hueco añade un punto; arrastrar lo mueve\n(con Mayús, despacio); doble clic o clic derecho lo quita.\nLo que pasa del blanco en un EXR sigue la pendiente del final de la curva.':
+        'Horizontal axis: the input value (as in a PNG: 0 black, 1 white);\nvertical: the output. Click on an empty spot to add a point; drag to move it\n(slowly with Shift); double-click or right-click removes it.\nWhat goes above white in an EXR follows the slope at the end of the curve.',
+    'Elegir LUT':
+        'Choose LUT',
+    'Elegir LUT…':
+        'Choose LUT…',
+    'Enfocar / desenfocar':
+        'Sharpen / blur',
+    'Equilibrio de color':
+        'Colour balance',
+    'LUT':
+        'LUT',
+    'LUT (*.cube *.CUBE);;Todos los ficheros (*)':
+        'LUT (*.cube *.CUBE);;All files (*)',
+    'La luminosidad no cambia: subir un color es quitar su opuesto.':
+        'Lightness does not change: adding a colour means removing its opposite.',
+    'La luz que queda justo en blanco; lo de más arriba sigue subiendo, pero\nmuy poco. Un PNG llega a unos 2,5 pasos: con un PNG, bájalo hasta ahí o se\napaga el blanco. En un render EXR, 5-7 recupera el sol, las lámparas y los\nreflejos que antes salían recortados (el Filmic de Blender llega a 6,5).':
+        "The light that ends up exactly white; anything above keeps rising, but\nvery little. A PNG reaches about 2.5 stops: with a PNG, lower it to there or\nwhite gets dull. In an EXR render, 5-7 brings back the sun, lamps and\nreflections that used to clip (Blender's Filmic reaches 6.5).",
+    'Las zonas se solapan poco a poco: no hay saltos entre ellas.':
+        'The ranges blend gradually: there are no jumps between them.',
+    'Mezcla':
+        'Mix',
+    'Ninguno':
+        'None',
+    'Niveles automáticos, mirando el fotograma que se ve: lleva lo más oscuro y lo\nmás claro de cada canal al negro y al blanco (deja fuera el 0,1 % de cada\nextremo). Estira el contraste y quita un tinte de color.\nCambia las curvas R, G y B y se queda fijo para toda la secuencia: si se\nrecalculara en cada fotograma, la imagen parpadearía.':
+        'Auto levels, measured on the frame being shown: moves the darkest and\nlightest of each channel to black and white (ignoring 0.1 % at each end).\nStretches the contrast and removes a colour cast.\nIt changes the R, G and B curves and stays fixed for the whole sequence: if it\nwere recomputed on every frame, the image would flicker.',
+    'No hay ningún fotograma cargado para medir':
+        'There is no frame loaded to measure',
+    'Por debajo de aquí no se toca nada: medios tonos y sombras quedan igual.\n1,5 = un poco por encima de la mitad del blanco de un PNG.':
+        "Nothing below this is touched: midtones and shadows stay the same.\n1.5 = a bit above half of a PNG's white.",
+    'Positivo enfoca (máscara de enfoque); negativo desenfoca, y -100 % es el\ndesenfoque entero. Va después del grano: si enfocas, el grano también.':
+        'Positive sharpens (unsharp mask); negative blurs, and -100 % is the\nfull blur. It comes after the grain: if you sharpen, the grain gets sharper too.',
+    'Radio':
+        'Radius',
+    'Tamaño de los detalles que realza (o del desenfoque), en píxeles de la\nimagen. Para enfocar un render, 0,5-1,5 px.':
+        'Size of the details it brings out (or of the blur), in image pixels.\nTo sharpen a render, 0.5-1.5 px.',
+    'Un LUT .cube (el formato de Resolve, Nuke, el VFB de V-Ray o LuxCore).\nSe aplica sobre la imagen en sRGB, como la de un PNG: sirve para los LUT de\nlook o de etalonaje, no para los que esperan una imagen en log (LogC, S-Log).':
+        'A .cube LUT (the format of Resolve, Nuke, the V-Ray VFB or LuxCore).\nIt is applied to the sRGB image, like a PNG: it works for look or grading\nLUTs, not for those that expect a log image (LogC, S-Log).',
+    'Volver a la recta la curva de este canal':
+        "Reset this channel's curve to a straight line",
+    '⚠ {name}: no se puede usar ({error})':
+        '⚠ {name}: cannot be used ({error})',
+    '3D de {n}':
+        '3D, {n}',
+    '1D de {n}':
+        '1D, {n}',
+    'Curva general: los tres canales a la vez (se aplica antes que la de cada canal).':
+        "Master curve: all three channels at once (applied before each channel's own).",
+    'Curva del rojo.':
+        'Red curve.',
+    'Curva del verde.':
+        'Green curve.',
+    'Curva del azul.':
+        'Blue curve.',
+    'Sombras':
+        'Shadows',
+    'Medios':
+        'Midtones',
+    'Luces':
+        'Highlights',
+    'Lo que se mueva afecta sobre todo a las sombras (y algo a los medios).':
+        'Changes mostly affect the shadows (and a little the midtones).',
+    'Lo que se mueva afecta sobre todo a los medios tonos.':
+        'Changes mostly affect the midtones.',
+    'Lo que se mueva afecta sobre todo a las luces (y algo a los medios).':
+        'Changes mostly affect the highlights (and a little the midtones).',
+    'Cian ↔ Rojo':
+        'Cyan ↔ Red',
+    'Magenta ↔ Verde':
+        'Magenta ↔ Green',
+    'Amarillo ↔ Azul':
+        'Yellow ↔ Blue',
+    'Hacia la derecha, más rojo; hacia la izquierda, más cian.':
+        'To the right, more red; to the left, more cyan.',
+    'Hacia la derecha, más verde; hacia la izquierda, más magenta.':
+        'To the right, more green; to the left, more magenta.',
+    'Hacia la derecha, más azul; hacia la izquierda, más amarillo.':
+        'To the right, more blue; to the left, more yellow.',
 }

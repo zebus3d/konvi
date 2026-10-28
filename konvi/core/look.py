@@ -1,10 +1,13 @@
 """Efectos de cámara de seqview: distorsión, aberración cromática, glow, viñeteado, halación, grano y
-un etalonaje sencillo (balance de blancos, brillo, contraste, gamma, saturación).
+un etalonaje sencillo (balance de blancos, brillo, contraste, gamma, saturación), una compresión de
+las luces y los retoques de la imagen final que traen el VFB de V-Ray o LuxCore: equilibrio de
+color por zonas, curvas RGB, LUT .cube y enfoque.
 
 Todo trabaja en luz lineal sobre un array float32 (alto, ancho, 4), RGBA sin premultiplicar,
 en el orden en que le pasa a la luz: primero el objetivo (distorsión, aberración cromática y
 viñeteado), después la película o el sensor (halación, grano o ruido) y por último el
-etalonaje, que se hace sobre lo ya rodado. Sin Qt: lo usa el visor para
+etalonaje, que se hace sobre lo ya rodado. Los retoques finales trabajan sobre los valores sRGB (los
+de un PNG), como en Photoshop: se pasa una vez a sRGB, se aplican todos y se vuelve. Sin Qt: lo usa el visor para
 enseñarlo y la exportación para escribirlo, así que lo que se ve es lo que se guarda.
 
 De dónde salen los valores por defecto:
@@ -73,8 +76,22 @@ DEFAULTS = {
               "amount": 1.0, "color": 1.0, "nr": 0.0},
     "grade": {"on": False, "temperature": 6500.0, "tint": 0.0, "exposure": 0.0, "contrast": 1.0,
               "gamma": 1.0, "saturation": 1.0},
+    # rodilla y blanco en pasos sobre el gris medio (0,51 y 5,8 en lineal)
+    "highlights": {"on": False, "knee": 1.5, "white": 5.0},
+    # desplazamiento de R, G y B (de -1 a 1) en cada zona
+    "balance": {"on": False, "shadows": [0.0, 0.0, 0.0], "midtones": [0.0, 0.0, 0.0],
+                "highlights": [0.0, 0.0, 0.0]},
+    # puntos [x, y] de cada curva, en valores sRGB de 0 a 1 (los de un PNG)
+    "curves": {"on": False, "master": [[0.0, 0.0], [1.0, 1.0]], "r": [[0.0, 0.0], [1.0, 1.0]],
+               "g": [[0.0, 0.0], [1.0, 1.0]], "b": [[0.0, 0.0], [1.0, 1.0]]},
+    "lut": {"on": False, "path": "", "mix": 1.0},
+    # cantidad: positiva enfoca (máscara de enfoque), -1 = el desenfoque entero
+    "sharpen": {"on": False, "amount": 0.5, "radius": 1.0},
 }
-EFFECTS = ("distortion", "aberration", "glow", "vignette", "halation", "grain", "grade")
+EFFECTS = ("distortion", "aberration", "glow", "vignette", "halation", "grain", "grade", "highlights",
+           "balance", "curves", "lut", "sharpen")
+CURVE_CHANNELS = ("master", "r", "g", "b")
+BALANCE_ZONES = ("shadows", "midtones", "highlights")
 
 # σD × 1000 a media escala (densidad ~1), leídas de las curvas de las fichas de Kodak, en el
 # orden R, G, B. La capa azul (la que forma el amarillo) es siempre la de más grano.
@@ -183,6 +200,16 @@ def merged(settings):
     for effect, values in (settings or {}).items():
         if effect in out and isinstance(values, dict):
             out[effect].update({k: v for k, v in values.items() if k in out[effect]})
+    for c in CURVE_CHANNELS:
+        out["curves"][c] = clean_curve(out["curves"][c])
+    for z in BALANCE_ZONES:
+        try:
+            v = [min(max(float(x), -1.0), 1.0) for x in out["balance"][z]]
+        except (TypeError, ValueError):
+            v = []
+        out["balance"][z] = v if len(v) == 3 else [0.0, 0.0, 0.0]
+    if not isinstance(out["lut"]["path"], str):
+        out["lut"]["path"] = ""
     return out
 
 
@@ -705,6 +732,348 @@ def grade(rgba, exposure=0.0, contrast=1.0, gamma=1.0, temperature=NEUTRAL_K, ti
     return rgba
 
 
+# ------------------------------------------------------------------ luces
+
+def shoulder_params(knee_ev, white_ev):
+    """(rodilla, blanco, a) en lineal para compress_highlights, con la rodilla por debajo de 1
+    y el blanco por encima, que si no la curva no llega al 1 o lo pasa."""
+    k = min(0.18 * 2.0 ** knee_ev, 0.9)
+    w = max(0.18 * 2.0 ** white_ev, 1.0 + 1e-3, k + 0.2)
+    r, room = w - k, 1.0 - k
+    return k, w, r * room / (r - room)
+
+
+def compress_highlights(rgba, knee=1.5, white=5.0):
+    """Hombro de la curva, como el «Highlight Burn» del VFB de V-Ray o el «burn» del Reinhard
+    de LuxCore, pero sin tocar nada por debajo de la rodilla: los medios tonos y las sombras
+    quedan como estaban. Por encima, t / (1 + t/a), que sale de la rodilla con la misma
+    pendiente (sin codo) y llega a 1 justo en el blanco; lo que pasa del blanco sigue
+    subiendo, cada vez menos. Por canal, como un negativo: una luz muy fuerte se va al blanco
+    aunque sea de color, en vez de quedarse en un color chillón recortado."""
+    k, _, a = shoulder_params(knee, white)
+    k, a = np.float32(k), np.float32(a)
+
+    def work(rows):
+        px = rgba[rows, :, :3]
+        t = px - k
+        over = t > 0
+        if over.any():
+            px[over] = k + t[over] / (1 + t[over] / a)
+
+    by_bands(rgba.shape[0], work)
+    return rgba
+
+
+# ------------------------------------------------------------------ curvas
+
+CURVE_MIN_GAP = 0.01        # lo más cerca que pueden estar dos puntos en x
+CURVE_LUT_SIZE = 4096
+
+
+def clean_curve(points):
+    """Los puntos de una curva tal como se guardan: dentro de 0-1, ordenados, sin dos casi en
+    la misma x y al menos dos. Lo que no se entienda (un JSON roto) vuelve a la recta."""
+    try:
+        pts = sorted((min(max(float(x), 0.0), 1.0), min(max(float(y), 0.0), 1.0)) for x, y in points)
+    except (TypeError, ValueError):
+        pts = []
+    out = []
+    for x, y in pts:
+        if not out or x - out[-1][0] >= CURVE_MIN_GAP / 2:
+            out.append([x, y])
+    return out if len(out) >= 2 else [[0.0, 0.0], [1.0, 1.0]]
+
+
+def is_identity(points):
+    return all(abs(x - y) < 1e-6 for x, y in points) and points[0][0] == 0 and points[-1][0] == 1
+
+
+def _pchip_end(h0, h1, d0, d1):
+    m = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1)
+    if np.sign(m) != np.sign(d0):
+        return 0.0
+    if np.sign(d0) != np.sign(d1) and abs(m) > abs(3 * d0):
+        return 3 * d0
+    return m
+
+
+def curve_eval(points, x):
+    """La curva que pasa por esos puntos, en x: cúbica monótona a trozos (Fritsch-Carlson, la
+    PCHIP), que no se pasa de largo entre dos puntos (una spline natural, como la de
+    Photoshop, hace ondas y puede invertir los tonos). Con dos puntos es la recta. Antes del
+    primer punto y después del último, plana."""
+    p = np.asarray(points, np.float64)
+    xs, ys = p[:, 0], p[:, 1]
+    x = np.clip(np.asarray(x, np.float64), xs[0], xs[-1])
+    h = np.diff(xs)
+    d = np.diff(ys) / h
+    m = np.full(len(xs), d[0])
+    if len(xs) > 2:
+        w1, w2 = 2 * h[1:] + h[:-1], h[1:] + 2 * h[:-1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mean = (w1 + w2) / (w1 / d[:-1] + w2 / d[1:])
+        m[1:-1] = np.where(d[:-1] * d[1:] > 0, mean, 0.0)
+        m[0] = _pchip_end(h[0], h[1], d[0], d[1])
+        m[-1] = _pchip_end(h[-1], h[-2], d[-1], d[-2])
+    i = np.clip(np.searchsorted(xs, x, side="right") - 1, 0, len(xs) - 2)
+    t = (x - xs[i]) / h[i]
+    t2, t3 = t * t, t * t * t
+    return ((2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h[i] * m[i] +
+            (3 * t2 - 2 * t3) * ys[i + 1] + (t3 - t2) * h[i] * m[i + 1])
+
+
+def _encode(v):
+    """De luz lineal a sRGB (y por encima de 1, la misma fórmula)."""
+    v = np.maximum(v, 0)
+    return np.where(v <= 0.0031308, v * 12.92, 1.055 * np.power(v, 1 / 2.4) - 0.055)
+
+
+def _decode(v):
+    v = np.maximum(v, 0)
+    return np.where(v <= 0.04045, v / 12.92, np.power((v + 0.055) / 1.055, 2.4))
+
+
+def auto_levels(rgba, clip=0.001):
+    """Curvas R, G y B que llevan el punto más oscuro y el más claro de cada canal (dejando
+    fuera ese tanto por uno en cada extremo, el 0,1 % de Photoshop) al negro y al blanco: estira
+    el contraste y quita un tinte de color. Se calcula sobre un fotograma y se queda fijo; si
+    se recalculara en cada uno, la secuencia parpadearía."""
+    h, w = rgba.shape[:2]
+    step = max(1, int(math.sqrt(h * w / 250_000)))          # con un cuarto de megapíxel basta
+    enc = _encode(rgba[::step, ::step, :3].reshape(-1, 3))
+    out = {}
+    for i, c in enumerate("rgb"):
+        lo, hi = np.quantile(enc[:, i], [clip, 1 - clip])
+        lo, hi = float(min(max(lo, 0.0), 1.0)), float(min(max(hi, 0.0), 1.0))
+        if hi - lo < 0.05:                                  # un canal plano: mejor no tocarlo
+            out[c] = [[0.0, 0.0], [1.0, 1.0]]
+        else:
+            out[c] = [[round(lo, 4), 0.0], [round(hi, 4), 1.0]]
+    return out
+
+
+def curves_table(curves):
+    """Lo que hacen las curvas a cada canal, sobre el valor sRGB: la general y después la del
+    canal (como el nodo RGB Curves de Blender), en una tabla a pasos iguales. Lo que pasa de 1
+    (las luces de un EXR) sigue la recta del final de la curva, sin recortarse."""
+    master = curve_eval(curves["master"], np.linspace(0, 1, CURVE_LUT_SIZE))
+    eps = 1e-3
+    top = curve_eval(curves["master"], [1 - eps, 1.0])
+    luts, ends = [], []
+    for c in "rgb":
+        luts.append(curve_eval(curves[c], master))
+        y = curve_eval(curves[c], top)
+        ends.append((np.float32(y[1]), np.float32(max(0.0, (y[1] - y[0]) / eps))))
+    return np.stack(luts).astype(np.float32), ends
+
+
+def apply_curves(enc, table):
+    """Las curvas sobre una imagen ya en sRGB (alto, ancho, 3 o 4)."""
+    luts, ends = table
+    n = luts.shape[1] - 1
+
+    def work(rows):
+        px = enc[rows, :, :3]
+        for c in range(3):
+            v = px[..., c]
+            t = np.clip(v, 0, 1) * np.float32(n)
+            i = np.minimum(t.astype(np.intp), n - 1)
+            lut = luts[c]
+            a = lut.take(i)
+            out = a + (lut.take(i + 1) - a) * (t - i)
+            over = v > 1
+            if over.any():
+                y1, slope = ends[c]
+                out[over] = y1 + slope * (v[over] - 1)
+            px[..., c] = out
+
+    by_bands(enc.shape[0], work)
+    return enc
+
+
+# ------------------------------------------------------------------ equilibrio de color
+
+BALANCE_SHIFT = 0.1         # cuánto se mueve el valor sRGB con un deslizador al 100 %
+
+
+def balance_offsets(balance):
+    """(zona, canal): lo que se suma en sombras, medios y luces. Sin el gris de cada
+    desplazamiento, para que la luminosidad no cambie (la casilla «Preserve Luminosity» de
+    Photoshop, siempre puesta): subir el rojo es quitar cian, no aclarar."""
+    o = np.array([balance[z] for z in BALANCE_ZONES], np.float32) * np.float32(BALANCE_SHIFT)
+    return o - (o @ LUMA)[:, None]
+
+
+def color_balance(enc, offsets):
+    """Equilibrio de color como el del VFB de V-Ray o el de Photoshop, sobre los valores sRGB.
+    Las tres zonas se reparten la imagen según su luminosidad L (de 0 a 1): sombras (1-L)²,
+    luces L² y medios lo que queda, 2L(1-L); suman 1, así que no hay saltos entre zonas."""
+    o = offsets.astype(np.float32)
+
+    def work(rows):
+        px = enc[rows, :, :3]
+        lum = np.clip(px @ LUMA, 0, 1)[..., None]
+        shadows = (1 - lum) ** 2
+        lights = lum * lum
+        px += shadows * o[0] + (1 - shadows - lights) * o[1] + lights * o[2]
+        np.maximum(px, 0, out=px)
+
+    by_bands(enc.shape[0], work)
+    return enc
+
+
+# ------------------------------------------------------------------ LUT
+
+def load_cube(path):
+    """Un LUT .cube (el formato de IRIDAS que usan Resolve, Nuke, el VFB, LuxCore...):
+    (tabla, mínimo, máximo). La tabla 3D es (n, n, n, 3) con el índice [azul, verde, rojo],
+    porque en el fichero el rojo es el que cambia más deprisa; la 1D, (n, 3). Lanza
+    ValueError si el fichero no se entiende."""
+    size3 = size1 = None
+    lo, hi = [0.0] * 3, [1.0] * 3
+    rows = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for number, line in enumerate(f, 1):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            key, *rest = line.split()
+            k = key.upper()
+            try:
+                if k == "TITLE":
+                    continue
+                if k == "LUT_3D_SIZE":
+                    size3 = int(rest[0])
+                elif k == "LUT_1D_SIZE":
+                    size1 = int(rest[0])
+                elif k == "DOMAIN_MIN":
+                    lo = [float(v) for v in rest[:3]]
+                elif k == "DOMAIN_MAX":
+                    hi = [float(v) for v in rest[:3]]
+                elif k in ("LUT_1D_INPUT_RANGE", "LUT_3D_INPUT_RANGE"):     # el de Resolve
+                    lo, hi = [float(rest[0])] * 3, [float(rest[1])] * 3
+                else:
+                    rows.append([float(v) for v in [key] + rest[:2]])
+            except (ValueError, IndexError):
+                raise ValueError(f"línea {number} que no se entiende: {line[:40]}") from None
+    size = size3 or size1
+    if not size or size < 2:
+        raise ValueError("no dice el tamaño (LUT_3D_SIZE o LUT_1D_SIZE)")
+    want = size ** 3 if size3 else size
+    if len(rows) != want or len(lo) != 3 or len(hi) != 3:
+        raise ValueError(f"tiene {len(rows)} valores y debería tener {want}")
+    table = np.array(rows, np.float32)
+    if size3:
+        table = table.reshape(size, size, size, 3)
+    return table, np.array(lo, np.float32), np.maximum(np.array(hi, np.float32), np.array(lo, np.float32) + 1e-6)
+
+
+def apply_lut(enc, lut, mix=1.0):
+    """El LUT sobre una imagen en sRGB, con interpolación trilineal (lineal en un 1D); mix
+    mezcla con la imagen de antes (el «Weight» del VFB). Lo que se sale del dominio del LUT
+    se queda en su borde: las luces de un EXR, mejor comprimirlas antes."""
+    table, lo, hi = lut
+    n = table.shape[0]
+    mix = np.float32(mix)
+
+    def work(rows):
+        px = enc[rows, :, :3]
+        x = np.clip((px - lo) / (hi - lo), 0, 1) * np.float32(n - 1)
+        i = np.minimum(x.astype(np.intp), n - 2)
+        f = x - i
+        if table.ndim == 2:
+            out = np.empty_like(px)
+            for c in range(3):
+                a = table[:, c].take(i[..., c])
+                out[..., c] = a + (table[:, c].take(i[..., c] + 1) - a) * f[..., c]
+        else:
+            flat = table.reshape(-1, 3)
+            base = (i[..., 2] * n + i[..., 1]) * n + i[..., 0]
+            fr, fg, fb = f[..., 0:1], f[..., 1:2], f[..., 2:3]
+
+            def along_r(offset):
+                a = flat.take(base + offset, axis=0)
+                return a + (flat.take(base + offset + 1, axis=0) - a) * fr
+            g0 = along_r(0)
+            g0 += (along_r(n) - g0) * fg
+            g1 = along_r(n * n)
+            g1 += (along_r(n * n + n) - g1) * fg
+            out = g0 + (g1 - g0) * fb
+        if mix != 1:
+            out = px + (out - px) * mix
+        px[...] = out
+
+    by_bands(enc.shape[0], work)
+    return enc
+
+
+# ------------------------------------------------------------------ enfoque
+
+def _blur_small(img, sigma):
+    """Desenfoque gaussiano de radio pequeño, directo: una pasada por filas y otra por
+    columnas, en float32 y por franjas (para un radio de 1 px, varias veces más rápido que
+    _blur_wide, que hace la FFT en float64 de la imagen entera)."""
+    r = int(math.ceil(3 * sigma))
+    k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2)
+    k = (k / k.sum()).astype(np.float32)
+    h, w = img.shape[:2]
+    wide = np.pad(img, ((0, 0), (r, r), (0, 0)), mode="edge")
+    tmp = np.empty((h + 2 * r,) + img.shape[1:], np.float32)
+
+    def across(rows):
+        src = wide[rows]
+        acc = src[:, :w] * k[0]
+        for j in range(1, 2 * r + 1):
+            acc += src[:, j:j + w] * k[j]
+        tmp[rows.start + r:rows.stop + r] = acc
+    by_bands(h, across, rows=32)
+    tmp[:r] = tmp[r]
+    tmp[h + r:] = tmp[h + r - 1]
+    out = np.empty_like(img)
+
+    def down(rows):
+        acc = tmp[rows.start:rows.stop] * k[0]
+        for j in range(1, 2 * r + 1):
+            acc += tmp[rows.start + j:rows.stop + j] * k[j]
+        out[rows] = acc
+    by_bands(h, down, rows=32)
+    return out
+
+
+def sharpen(enc, amount, radius):
+    """Máscara de enfoque sobre los valores sRGB (como en Photoshop: en lineal, los halos
+    oscuros salen el doble de marcados): se suma amount veces lo que la imagen tiene de más
+    que su versión desenfocada con una gaussiana de ese radio. Con amount negativo se resta, y
+    -1 es el desenfoque entero."""
+    radius = max(radius, 0.3)
+    rgb = np.ascontiguousarray(enc[..., :3])
+    blurred = _blur_small(rgb, radius) if radius < 3 else _blur_wide(rgb, radius)
+    k = np.float32(amount)
+
+    def work(rows):
+        px = enc[rows, :, :3]
+        px += (px - blurred[rows]) * k
+        np.maximum(px, 0, out=px)
+
+    by_bands(enc.shape[0], work)
+    return enc
+
+
+def to_display(rgba):
+    enc = np.empty(rgba.shape[:2] + (3,), np.float32)
+
+    def work(rows):
+        enc[rows] = _encode(rgba[rows, :, :3])
+    by_bands(rgba.shape[0], work)
+    return enc
+
+
+def from_display(rgba, enc):
+    def work(rows):
+        rgba[rows, :, :3] = _decode(enc[rows])
+    by_bands(rgba.shape[0], work)
+
+
 # ------------------------------------------------------------------ todo junto
 
 class Look:
@@ -769,7 +1138,46 @@ class Look:
             self._grain(rgba, g, frame)
         if s["grade"]["on"]:
             grade(rgba, **{k: v for k, v in s["grade"].items() if k != "on"})
+        hl = s["highlights"]
+        if hl["on"]:
+            compress_highlights(rgba, hl["knee"], hl["white"])
+        # los retoques de la imagen final, sobre los valores sRGB: se pasa una sola vez
+        stage = []
+        bal = s["balance"]
+        if bal["on"] and any(any(bal[z]) for z in BALANCE_ZONES):
+            stage.append(lambda enc: color_balance(enc, balance_offsets(bal)))
+        cv = s["curves"]
+        if cv["on"] and not all(is_identity(cv[c]) for c in CURVE_CHANNELS):
+            table = self._cached(("curves", repr([cv[c] for c in CURVE_CHANNELS])),
+                                 lambda: curves_table(cv))
+            stage.append(lambda enc: apply_curves(enc, table))
+        lt = s["lut"]
+        lut = self.lut(lt["path"]) if lt["on"] and lt["path"] and lt["mix"] else None
+        if lut is not None:
+            stage.append(lambda enc: apply_lut(enc, lut, lt["mix"]))
+        sh = s["sharpen"]
+        if sh["on"] and sh["amount"]:
+            stage.append(lambda enc: sharpen(enc, sh["amount"], sh["radius"]))
+        if stage:
+            enc = to_display(rgba)
+            for step in stage:
+                step(enc)
+            from_display(rgba, enc)
         return rgba
+
+    def lut(self, path):
+        """El LUT de ese fichero, leído una vez (y otra si cambia); None si no se puede leer."""
+        try:
+            stamp = os.stat(path).st_mtime_ns
+        except OSError:
+            return None
+
+        def read():
+            try:
+                return load_cube(path)
+            except (OSError, ValueError):
+                return None
+        return self._cached(("lut", path, stamp), read)
 
     def _halation(self, rgba, hal, gauge):
         """Lo que pasa del umbral se desenfoca y vuelve teñido de naranja-rojo."""
