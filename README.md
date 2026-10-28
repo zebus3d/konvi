@@ -86,8 +86,9 @@ lista como un vídeo (`render_####.png · 250 fotogramas`) y se convierte con cu
   pausar y reproducir, ← → (Mayús+← → salta al principio o al final), A para el fondo de cuadros,
   R / G / B / Mayús+A para ver un canal y C para volver al color, E / Mayús+E para la exposición
   (en lineal: en un EXR saca las luces quemadas), Y / Mayús+Y para la gamma, 0 para quitarlas, y
-  Ctrl+R (o el botón ⟳) para añadir los fotogramas nuevos de un render que sigue en marcha. Lo
-  que Qt no sabe leer (EXR sin `kimageformats`) lo lee ffmpeg.
+  Ctrl+R (o el botón ⟳) para añadir los fotogramas nuevos de un render que sigue en marcha y
+  volver a leer los que se hayan re-renderizado. Lo que Qt no sabe leer (EXR sin
+  `kimageformats`) lo lee ffmpeg.
 
 **De vídeo a imágenes.** El destino **Imágenes** guarda cada fotograma en una carpeta con el
 nombre del vídeo (`clip/clip_0001.png`…). PNG y TIFF conservan la transparencia y los 16

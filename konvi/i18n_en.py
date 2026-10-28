@@ -409,15 +409,17 @@ EN = {
     "caché {loaded}/{n}": "cache {loaded}/{n}",
     "{fps} fps reales": "{fps} real fps",
     "Último fotograma (Fin)": "Last frame (End)",
-    "Buscar fotogramas nuevos (Ctrl+R, F5)\n"
+    "Buscar fotogramas nuevos o cambiados (Ctrl+R, F5)\n"
     "Para ver un render que sigue en marcha sin volver a abrirlo.":
-        "Look for new frames (Ctrl+R, F5)\n"
+        "Look for new or changed frames (Ctrl+R, F5)\n"
         "To follow a render that is still running without reopening it.",
     "Buscando fotogramas nuevos…": "Looking for new frames…",
     "No se encuentra la secuencia": "The sequence can't be found",
     "No hay fotogramas nuevos": "No new frames",
     "1 fotograma nuevo": "1 new frame",
     "{n} fotogramas nuevos": "{n} new frames",
+    "1 fotograma cambiado": "1 changed frame",
+    "{n} fotogramas cambiados": "{n} changed frames",
     "Secuencia actualizada": "Sequence updated",
     "Exposición en pasos, en lineal (E / Mayús+E; 0 la deja a cero).\n"
     "En un EXR saca lo que hay en las luces quemadas.":

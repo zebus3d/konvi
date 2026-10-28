@@ -166,8 +166,17 @@ def load_image(path):
     return image, ""
 
 
+def file_stamp(path):
+    """Fecha y tamaño del fichero: si cambian, alguien lo ha vuelto a escribir (un re-render)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
 class _Bridge(QObject):
-    loaded = Signal(int, int, QImage, str)     # generación, índice, imagen, error
+    loaded = Signal(int, int, QImage, str, object)     # generación, índice, imagen, error, sello
 
 
 class _LoadTask(QRunnable):
@@ -176,28 +185,31 @@ class _LoadTask(QRunnable):
         self.bridge, self.generation, self.index, self.path = bridge, generation, index, path
 
     def run(self):
+        stamp = file_stamp(self.path)   # antes de leer: si cambia mientras, el refresco lo ve
         image, error = load_image(self.path)
-        self.bridge.loaded.emit(self.generation, self.index, image, error)
+        self.bridge.loaded.emit(self.generation, self.index, image, error, stamp)
 
 
 class _FinderBridge(QObject):
-    found = Signal(int, object)                # turno, lista de rutas
+    found = Signal(int, object, object)        # turno, lista de rutas, rutas que han cambiado
 
 
 class _FindTask(QRunnable):
     """Buscar la secuencia recorre la carpeta: en un NAS con miles de ficheros tarda, así que
     va en un hilo y la ventana se abre antes."""
 
-    def __init__(self, bridge, token, args):
+    def __init__(self, bridge, token, args, stamps=None):
         super().__init__()
         self.bridge, self.token, self.args = bridge, token, args
+        self.stamps = dict(stamps or {})        # ruta -> sello de lo que hay en memoria
 
     def run(self):
         try:
             paths = collect(self.args)
         except OSError:
             paths = []
-        self.bridge.found.emit(self.token, paths)
+        changed = {p for p, stamp in self.stamps.items() if file_stamp(p) != stamp}
+        self.bridge.found.emit(self.token, paths, changed)
 
 
 class FrameCache(QObject):
@@ -215,6 +227,7 @@ class FrameCache(QObject):
         self.budget = memory_budget()
         self.paths = []
         self.images = {}
+        self.stamps = {}                # índice -> sello del fichero cuando se leyó
         self.errors = {}
         self.inflight = set()
         self.generation = 0
@@ -228,20 +241,29 @@ class FrameCache(QObject):
         self.pool.clear()
         self.paths = list(paths)
         self.images.clear()
+        self.stamps.clear()
         self.errors.clear()
         self.inflight.clear()
         self.frame_bytes = 0
         self._wanted = set()
 
-    def remap(self, paths):
+    def loaded_stamps(self):
+        """Ruta -> sello de los fotogramas que hay en memoria, para ver al refrescar cuáles han cambiado."""
+        return {self.paths[i]: self.stamps.get(i) for i in self.images}
+
+    def remap(self, paths, stale=()):
         """Cambia la lista de fotogramas conservando en memoria los que siguen en ella, para no
-        volver a leerlos al refrescar. Los que fallaron se reintentan: en un render en marcha
-        suelen ser fotogramas que aún se estaban escribiendo."""
-        kept = {p: self.images[i] for i, p in enumerate(self.paths) if i in self.images}
+        volver a leerlos al refrescar, salvo los de `stale` (re-renderizados desde que se leyeron).
+        Los que fallaron se reintentan: en un render en marcha suelen ser fotogramas que aún se
+        estaban escribiendo."""
+        stale = set(stale)
+        kept = {p: (self.images[i], self.stamps.get(i)) for i, p in enumerate(self.paths)
+                if i in self.images and p not in stale}
         self.generation += 1
         self.pool.clear()
         self.paths = list(paths)
-        self.images = {i: kept[p] for i, p in enumerate(self.paths) if p in kept}
+        self.images = {i: kept[p][0] for i, p in enumerate(self.paths) if p in kept}
+        self.stamps = {i: kept[p][1] for i, p in enumerate(self.paths) if p in kept}
         self.errors.clear()
         self.inflight.clear()
         self._wanted = set()
@@ -279,6 +301,7 @@ class FrameCache(QObject):
         evicted = [i for i in self.images if i not in self._wanted]
         for i in evicted:
             del self.images[i]
+            self.stamps.pop(i, None)
         limit = self.pool.maxThreadCount() * 2
         for i in order:
             if len(self.inflight) >= limit:
@@ -290,7 +313,7 @@ class FrameCache(QObject):
         if evicted:
             self.changed.emit()
 
-    def _on_loaded(self, generation, index, image, error):
+    def _on_loaded(self, generation, index, image, error, stamp=None):
         if generation != self.generation:
             return
         self.inflight.discard(index)
@@ -300,6 +323,7 @@ class FrameCache(QObject):
             self.frame_bytes = max(self.frame_bytes, image.sizeInBytes())
             if index in self._wanted or index == self._current:
                 self.images[index] = image
+                self.stamps[index] = stamp
         self.frame_ready.emit(index)
         self.update(self._current, self._loop)
         self.changed.emit()
@@ -660,7 +684,7 @@ class Player(QWidget):
         self.btn_play = tool_button("play", tr("Reproducir / pausa (Espacio)"), self.toggle_play)
         self.btn_loop = tool_button("loop", tr("Repetir en bucle (L)"), self._set_loop, True)
         self.btn_loop.setChecked(True)
-        self.btn_refresh = tool_button("refresh", tr("Buscar fotogramas nuevos (Ctrl+R, F5)\n"
+        self.btn_refresh = tool_button("refresh", tr("Buscar fotogramas nuevos o cambiados (Ctrl+R, F5)\n"
                                                      "Para ver un render que sigue en marcha sin volver a abrirlo."),
                                        self.refresh)
         self.frame_label = QLabel()
@@ -804,7 +828,7 @@ class Player(QWidget):
         self.viewer.set_image(None, tr("Buscando la secuencia…"))
         QThreadPool.globalInstance().start(_FindTask(self._finder, self._find_token, self._find_args))
 
-    def _on_found(self, token, paths):
+    def _on_found(self, token, paths, _changed=()):
         if token != self._find_token:
             return                      # llegó otra petición después
         if paths:
@@ -821,29 +845,32 @@ class Player(QWidget):
         self.btn_refresh.setEnabled(False)
         self._show_notice(tr("Buscando fotogramas nuevos…"), 0)
         args = self._source or [str(self.paths[0])]
-        QThreadPool.globalInstance().start(_FindTask(self._refresher, self._refresh_token, args))
+        QThreadPool.globalInstance().start(_FindTask(self._refresher, self._refresh_token, args,
+                                                     self.cache.loaded_stamps()))
 
-    def _on_refreshed(self, token, paths):
+    def _on_refreshed(self, token, paths, changed=()):
         if token != self._refresh_token:
             return                      # entretanto se abrió otra cosa
         self.btn_refresh.setEnabled(True)
         if not paths:
             self._show_notice(tr("No se encuentra la secuencia"))
             return
-        if paths == self.paths and not self.cache.errors:
+        if paths == self.paths and not self.cache.errors and not changed:
             self._show_notice(tr("No hay fotogramas nuevos"))
             return
         added = len(set(paths) - set(self.paths))
         current = self.paths[self.current]
         self.paths = list(paths)
-        self.cache.remap(self.paths)
+        self.cache.remap(self.paths, changed)
         self.timeline.count = len(self.paths)
         self.setWindowTitle(f"{describe(self.paths)} — {APP}")
         self.seek(self.paths.index(current) if current in self.paths
                   else min(self.current, len(self.paths) - 1))
-        self._show_notice(tr("1 fotograma nuevo") if added == 1 else
-                          tr("{n} fotogramas nuevos", n=added) if added else
-                          tr("Secuencia actualizada"))
+        changed = len(set(changed) & set(paths))
+        parts = ([tr("1 fotograma nuevo") if added == 1 else tr("{n} fotogramas nuevos", n=added)] * bool(added)
+                 + [tr("1 fotograma cambiado") if changed == 1 else tr("{n} fotogramas cambiados", n=changed)]
+                 * bool(changed))
+        self._show_notice(", ".join(parts) or tr("Secuencia actualizada"))
 
     def _show_notice(self, text, ms=4000):
         self._notice = text

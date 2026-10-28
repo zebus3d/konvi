@@ -330,6 +330,35 @@ class SeqviewTests(unittest.TestCase):
                 player.close()
                 player.cache.wait()
 
+    def test_refrescar_relee_los_fotogramas_cambiados(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            copy = lambda i, j=None: (d / f"r_{i:03d}.png").write_bytes(
+                (self.dir / f"shot_{j or i:04d}.png").read_bytes())
+            for i in range(1, 6):
+                copy(i)
+            player = seqview.Player([d / f"r_{i:03d}.png" for i in range(1, 6)], fps=24)
+            try:
+                self.assertTrue(wait_until(lambda: len(player.cache.images) == 5))
+                player.seek(1)
+                kept, old = player.cache.images[0], player.cache.images[1]
+                copy(2, 9)                      # se vuelve a renderizar el fotograma 2
+                st = os.stat(d / "r_002.png")
+                os.utime(d / "r_002.png", ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+                player.refresh()
+                self.assertTrue(wait_until(lambda: player._notice == "1 fotograma cambiado"))
+                self.assertEqual(len(player.paths), 5)
+                self.assertEqual(player.current, 1)
+                self.assertIs(player.cache.images.get(0), kept)        # lo que no cambió no se relee
+                self.assertTrue(wait_until(lambda: 1 in player.cache.images))
+                self.assertIsNot(player.cache.images[1], old)
+                self.assertIs(player.viewer.image, player.cache.images[1])  # y se ve el nuevo
+                player.refresh()
+                self.assertTrue(wait_until(lambda: player._notice == "No hay fotogramas nuevos"))
+            finally:
+                player.close()
+                player.cache.wait()
+
     def test_cache_limitada_por_memoria(self):
         cache = seqview.FrameCache()
         cache.set_paths([Path(f"x{i}.png") for i in range(1000)])
