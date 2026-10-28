@@ -839,14 +839,14 @@ class Player(QWidget):
         key, text = event.key(), event.text().lower()
         if key == Qt.Key_Space:
             self.toggle_play()
-        elif key == Qt.Key_Right:
-            self.step(10 if event.modifiers() & Qt.ShiftModifier else 1)
-        elif key == Qt.Key_Left:
-            self.step(-10 if event.modifiers() & Qt.ShiftModifier else -1)
-        elif key == Qt.Key_Home:
-            self._scrub(0)
-        elif key == Qt.Key_End:
+        elif key == Qt.Key_End or (key == Qt.Key_Right and event.modifiers() & Qt.ShiftModifier):
             self._scrub(len(self.paths) - 1)
+        elif key == Qt.Key_Home or (key == Qt.Key_Left and event.modifiers() & Qt.ShiftModifier):
+            self._scrub(0)
+        elif key == Qt.Key_Right:
+            self.step(1)
+        elif key == Qt.Key_Left:
+            self.step(-1)
         elif text == "l":
             self.btn_loop.toggle()
         elif text == "f":

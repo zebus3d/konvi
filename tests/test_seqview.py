@@ -206,6 +206,21 @@ class SeqviewTests(unittest.TestCase):
             self.assertTrue(image.isNull())
             self.assertTrue(error)
 
+    def test_mayus_flechas_saltan_al_principio_y_al_final(self):
+        from PySide6.QtTest import QTest
+        player = seqview.Player(seqview.collect([str(self.dir)]), fps=200)
+        try:
+            player.seek(10)
+            QTest.keyClick(player, Qt.Key_Right)
+            self.assertEqual(player.current, 11)
+            QTest.keyClick(player, Qt.Key_Right, Qt.ShiftModifier)       # como en Blender
+            self.assertEqual(player.current, len(player.paths) - 1)
+            QTest.keyClick(player, Qt.Key_Left, Qt.ShiftModifier)
+            self.assertEqual(player.current, 0)
+        finally:
+            player.close()
+            player.cache.wait()
+
     def test_refrescar_anade_los_fotogramas_nuevos(self):
         from PySide6.QtTest import QTest
         with tempfile.TemporaryDirectory() as d:
