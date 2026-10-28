@@ -575,6 +575,22 @@ class PanelTests(unittest.TestCase):
         self.assertLess(slider.value(), 70)
         QTest.mouseClick(slider, Qt.LeftButton, Qt.ControlModifier, slider.rect().center())
         self.assertEqual(row.value(), 0.0)              # Ctrl+clic: al valor por defecto
+        # arrastrar 40 px: normal mueve diez veces más que con Mayús
+        from PySide6.QtCore import QPoint
+        def drag(mods):
+            row.set_value(50.0)
+            start = slider.rect().center()
+            QTest.mousePress(slider, Qt.LeftButton, Qt.NoModifier, start)
+            from PySide6.QtGui import QMouseEvent
+            from PySide6.QtCore import QEvent, QPointF
+            end = QPointF(start + QPoint(40, 0))
+            QApplication.sendEvent(slider, QMouseEvent(QEvent.MouseMove, end, slider.mapToGlobal(end),
+                                                       Qt.NoButton, Qt.LeftButton, mods))
+            QTest.mouseRelease(slider, Qt.LeftButton, Qt.NoModifier, start + QPoint(40, 0))
+            return row.value() - 50.0
+        normal, fine = drag(Qt.NoModifier), drag(Qt.ShiftModifier)
+        self.assertGreater(normal, 5)
+        self.assertLess(abs(fine), abs(normal) / 4)
         row.close()
 
     def test_restablecer_un_efecto_y_plegar(self):

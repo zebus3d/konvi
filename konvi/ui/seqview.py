@@ -715,29 +715,57 @@ class Timeline(QWidget):
 
 class JumpSlider(QSlider):
     """Un deslizador que salta adonde se pincha en la barra (no hay que apuntar a la bolita)
-    y desde ahí se sigue arrastrando. Ctrl+clic pide volver al valor por defecto."""
+    y desde ahí se sigue arrastrando. Con Mayús pulsada va diez veces más despacio, para
+    afinar, como en Blender (se puede pulsar y soltar a mitad del arrastre). Ctrl+clic pide
+    volver al valor por defecto."""
 
     reset_requested = Signal()
+    FINE = 0.1                          # con Mayús, una décima parte de la velocidad
 
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
+        self._drag_x = None
+        self._drag_value = 0.0
+
+    def _geometry(self):
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        style = self.style()
+        handle = style.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
+        groove = style.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
+        return opt, handle, groove, max(1, groove.width() - handle.width())
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and event.modifiers() & Qt.ControlModifier:
+        if event.button() != Qt.LeftButton:
+            return super().mousePressEvent(event)
+        if event.modifiers() & Qt.ControlModifier:
             self.reset_requested.emit()
             return
-        if event.button() == Qt.LeftButton:
-            opt = QStyleOptionSlider()
-            self.initStyleOption(opt)
-            style = self.style()
-            handle = style.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
-            if not handle.contains(event.position().toPoint()):
-                groove = style.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
-                x = event.position().x() - groove.x() - handle.width() / 2
-                span = max(1, groove.width() - handle.width())
-                self.setValue(QStyle.sliderValueFromPosition(self.minimum(), self.maximum(),
-                                                             round(x), span, opt.upsideDown))
-        super().mousePressEvent(event)      # con la bolita ya debajo, empieza a arrastrar
+        opt, handle, groove, span = self._geometry()
+        if not handle.contains(event.position().toPoint()) and not event.modifiers() & Qt.ShiftModifier:
+            x = event.position().x() - groove.x() - handle.width() / 2
+            self.setValue(QStyle.sliderValueFromPosition(self.minimum(), self.maximum(),
+                                                         round(x), span, opt.upsideDown))
+        self._drag_x = event.position().x()
+        self._drag_value = float(self.value())
+        self.setSliderDown(True)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_x is None:
+            return super().mouseMoveEvent(event)
+        _, _, _, span = self._geometry()
+        dx = event.position().x() - self._drag_x
+        self._drag_x = event.position().x()
+        speed = self.FINE if event.modifiers() & Qt.ShiftModifier else 1.0
+        self._drag_value += dx * (self.maximum() - self.minimum()) / span * speed
+        self._drag_value = min(max(self._drag_value, self.minimum()), self.maximum())
+        self.setValue(round(self._drag_value))
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_x is None:
+            return super().mouseReleaseEvent(event)
+        self._drag_x = None
+        self.setSliderDown(False)
 
 
 class ValueRow(QWidget):

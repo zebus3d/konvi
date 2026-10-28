@@ -94,7 +94,8 @@ lista como un vídeo (`render_####.png · 250 fotogramas`) y se convierte con cu
   cromática, glow (con cola larga, como los «exponential glow» de Nuke), viñeteado,
   halación, grano de película o ruido de sensor, y color, brillo y
   contraste. Cada efecto se enciende con su casilla, se pliega con su flecha y vuelve a sus
-  valores con su botón; Ctrl+clic en un deslizador lo devuelve a su valor. Arriba hay cámaras
+  valores con su botón; Ctrl+clic en un deslizador lo devuelve a su valor y con Mayús va más
+  despacio, para afinar. Arriba hay cámaras
   completas (cine digital, 35 mm 500T o 250D, 16 mm, Super 8, objetivo antiguo, réflex, cámara
   de acción, móvil). Los valores salen de medidas reales (LensTip, Imatest, lensfun, las fichas
   de Kodak VISION3, DxOMark). M los silencia para comparar con el original; al abrir vienen
