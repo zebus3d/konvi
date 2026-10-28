@@ -568,25 +568,21 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(after["vignette"], dict(seqview.fx.DEFAULTS["vignette"], on=True))
         self.assertEqual(after["grain"], settings["grain"])        # los demás, igual
         panel.show()
+        panel.set_expanded("grain", True)
+        self.assertTrue(panel.bodies["grain"].isVisible())
         panel.set_expanded("grain", False)
         self.assertFalse(panel.bodies["grain"].isVisible())
-        self.assertEqual(panel.folded(), ["grain"])
+        self.assertIn("grain", panel.folded())
         panel.boxes["grain"].setChecked(False)
         panel.boxes["grain"].setChecked(True)                      # al encenderlo se despliega
         self.assertTrue(panel.bodies["grain"].isVisible())
         panel.close()
 
-    def test_las_secciones_plegadas_se_recuerdan(self):
-        first = seqview.Player([])
-        try:
-            first.panel.set_expanded("halation", False)
-        finally:
-            first.close()
+    def test_al_abrir_todo_plegado(self):
         player = seqview.Player([])
         try:
-            self.assertEqual(player.panel.folded(), ["halation"])
+            self.assertEqual(player.panel.folded(), list(seqview.fx.EFFECTS))
         finally:
-            player.prefs.remove('seqview/look_folded')
             player.close()
 
     def test_deslizadores_de_exposicion_y_gamma(self):

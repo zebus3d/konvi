@@ -1045,7 +1045,7 @@ class LookPanel(QWidget):
         col.addLayout(header)
         col.addWidget(body)
         self.boxes[effect], self.bodies[effect], self.arrows[effect] = box, body, arrow
-        self.expanded[effect] = True
+        self.expanded[effect] = False           # al abrir, todo plegado: el panel cabe sin scroll
         self._refresh_section(effect)
 
     def settings(self):
@@ -1220,10 +1220,6 @@ class Player(QWidget):
         except (TypeError, ValueError):
             pass
         self.viewer.look.set(self.panel.settings())
-        folded = self.prefs.value("seqview/look_folded", "")
-        self.panel.set_folded(folded.split(",") if isinstance(folded, str) and folded else [])
-        self.panel.folding_changed.connect(
-            lambda: self.prefs.setValue("seqview/look_folded", ",".join(self.panel.folded())))
         self.panel.setVisible(self.prefs.value("seqview/look_panel", False, type=bool))
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.PreciseTimer)
