@@ -429,4 +429,196 @@ EN = {
     "Canal que se ve: C color, R rojo, G verde, B azul, Mayús+A alfa":
         "Channel shown: C color, R red, G green, B blue, Shift+A alpha",
     "Exp.": "Exp.",
+
+    # ---------------------------------------------------------------- visor: efectos de cámara
+    '0 % = blanco y negro; 100 % = sin cambio. La luminancia no cambia.':
+        '0 % = black and white; 100 % = unchanged. Luminance stays the same.',
+    '0 = círculo; 100 = un cuadrado con las esquinas redondeadas.':
+        '0 = circle; 100 = a square with rounded corners.',
+    '0 = redondo, como un objetivo de verdad (las esquinas quedan más oscuras que\nlos lados); 100 = estirado a la forma de la imagen.':
+        '0 = round, like a real lens (the corners end up darker than\nthe sides); 100 = stretched to the shape of the image.',
+    '100 % = lo que da esa película o ese sensor de verdad.':
+        '100 % = what that film stock or sensor really gives.',
+    '16 mm (500T)':
+        '16 mm (500T)',
+    'Aberración cromática':
+        'Chromatic aberration',
+    'Aberración cromática lateral, en % de la distancia del centro a la esquina\n(la medida de Imatest y LensTip): 0,04 % es baja, 0,08 % entre baja y media,\n0,12 % media. Negativo cambia qué color queda por fuera.':
+        'Lateral chromatic aberration, in % of the centre-to-corner distance\n(as Imatest and LensTip measure it): 0.04 % is low, 0.08 % low to moderate,\n0.12 % moderate. Negative swaps which colour ends up outside.',
+    'Abrir…':
+        'Open…',
+    'Acerca la imagen lo justo para que no queden esquinas vacías,\ncomo hace la cámara al corregir o al grabar recortando el sensor.':
+        'Zooms in just enough to leave no empty corners,\nlike a camera does when it corrects or crops the sensor.',
+    'Ajustar a la ventana':
+        'Fit to window',
+    'Alfa':
+        'Alpha',
+    'Alrededor del gris medio, como en un etalonaje: el gris no se mueve, las\nluces suben y las sombras bajan. 100 % = sin cambio.':
+        'Around middle grey, as in a colour grade: grey stays put,\nhighlights go up and shadows go down. 100 % = unchanged.',
+    'Apaga todos los efectos y vuelve a los valores por defecto':
+        'Turns every effect off and goes back to the default values',
+    'Azul':
+        'Blue',
+    'Balance de blancos, como en la cámara o en Lightroom: de qué color era la\nluz. 3200 K (bombilla) enfría la imagen para compensarla; por encima de\n6500 K (luz de día nublado) se calienta.':
+        'White balance, as in the camera or in Lightroom: what colour the light\nwas. 3200 K (tungsten) cools the image to compensate; above\n6500 K (overcast daylight) it gets warmer.',
+    'Brillo':
+        'Brightness',
+    'Buscar fotogramas nuevos':
+        'Look for new frames',
+    'Canal':
+        'Channel',
+    'Cantidad':
+        'Amount',
+    'Cantidad (TV distortion)':
+        'Amount (TV distortion)',
+    'Cantidad (pasos que pierde la esquina)':
+        'Amount (stops lost in the corner)',
+    'Cine 35 mm (250D)':
+        '35 mm cinema (250D)',
+    'Cine 35 mm (500T)':
+        '35 mm cinema (500T)',
+    'Cine digital (Super 35)':
+        'Digital cinema (Super 35)',
+    'Color':
+        'Colour',
+    'Color (RGB)':
+        'Colour (RGB)',
+    'Color, brillo y contraste':
+        'Colour, brightness and contrast',
+    'Contraste':
+        'Contrast',
+    'Cuánta luz vuelve rebotada del soporte. Un negativo de cine con su capa\nantihalo: 1-3 %. Sin ella (CineStill y parecidas): 10-20 %.':
+        'How much light bounces back from the base. A motion picture negative with its\nanti-halation layer: 1-3 %. Without it (CineStill and the like): 10-20 %.',
+    'Cámara':
+        'Camera',
+    'Cámara de acción':
+        'Action camera',
+    'Desde (pasos sobre el gris medio)':
+        'From (stops above middle grey)',
+    'Distorsión':
+        'Distortion',
+    'Doble clic aquí o Ctrl+clic en el deslizador para volver a {value}.':
+        'Double-click here or Ctrl+click the slider to go back to {value}.',
+    'Efectos activos':
+        'Effects on',
+    'Efectos de cámara':
+        'Camera effects',
+    'Efectos de cámara — silenciados':
+        'Camera effects — muted',
+    'Efectos de cámara: distorsión, aberración cromática,\nviñeteado, halación, grano y color (V)':
+        'Camera effects: distortion, chromatic aberration,\nvignetting, halation, grain and colour (V)',
+    'Efectos silenciados (M)':
+        'Effects muted (M)',
+    'Efectos silenciados: se ve el original. Clic o M para volver a verlos.':
+        'Effects muted: you see the original. Click or press M to see them again.',
+    'El grano de cada emulsión sale de las curvas de granularidad de Kodak.':
+        "Each stock's grain comes from Kodak's granularity curves.",
+    'El mismo negativo en un fotograma más pequeño se amplía más: más grano y más grueso.':
+        'The same negative in a smaller frame is enlarged more: more and coarser grain.',
+    'Emulsión':
+        'Film stock',
+    'Encuadre: círculo → elipse':
+        'Frame: circle → ellipse',
+    'Exposición 0 y gamma 1':
+        'Exposure 0 and gamma 1',
+    'Fondo de cuadros (alfa)':
+        'Checkerboard background (alpha)',
+    'Forma: redonda → cuadrada':
+        'Shape: round → square',
+    'Formato':
+        'Gauge',
+    'Gamma':
+        'Gamma',
+    'Grano / ruido':
+        'Grain / noise',
+    'Halación':
+        'Halation',
+    'Hasta dónde se deja el centro sin oscurecer. 0 = como un objetivo.':
+        'How far out the centre is left undarkened. 0 = like a lens.',
+    'La que hacen un móvil o una cámara de acción: menos ruido de luminancia y\nel de color en manchas más grandes y suaves. 0 % = una cámara grande.':
+        'What a phone or an action camera does: less luminance noise and\nthe colour noise in bigger, softer blotches. 0 % = a large camera.',
+    'Más de 1 aclara los medios tonos, menos de 1 los oscurece; el negro y el\nblanco no se mueven.':
+        'Above 1 brightens the midtones, below 1 darkens them; black and\nwhite stay put.',
+    'Móvil de noche':
+        'Phone at night',
+    'Negativo = barril (las rectas se curvan hacia fuera), positivo = cojín.\nUn 50 mm f/1.4 da -1 a -1,3 %; una GoPro sin corregir («Wide»), unos -30 %.\n(Las cifras de LensTip son la distorsión en la esquina: divídelas por 1,4-1,5.)':
+        'Negative = barrel (straight lines bow outwards), positive = pincushion.\nA 50 mm f/1.4 gives -1 to -1.3 %; an uncorrected GoPro ("Wide"), about -30 %.\n(LensTip figures are the distortion at the corner: divide them by 1.4-1.5.)',
+    'Objetivo antiguo':
+        'Vintage lens',
+    'Panel de efectos':
+        'Effects panel',
+    'Pantalla completa':
+        'Full screen',
+    'Pasos de luz que se pierden en la esquina: a la derecha, más oscuro.\nUn 50 mm f/1.4 abierto pierde entre 0,75 y 3 (mediana de LensTip: 1,3);\ncerrado a f/4, medio paso. Por debajo de 0 aclara los bordes.':
+        'Stops of light lost in the corner: to the right, darker.\nA 50 mm f/1.4 wide open loses between 0.75 and 3 (LensTip median: 1.3);\nstopped down to f/4, half a stop. Below 0 brightens the edges.',
+    'Pasos de luz: +1 dobla la luz, -1 la reduce a la mitad.':
+        'Stops of light: +1 doubles the light, -1 halves it.',
+    'Película':
+        'Film',
+    'Película: 100 % = cada capa con su grano (algo correlado entre capas, como\nen la real); 0 % = grano en gris. Sensor: cuánto del ruido es de color\n(una cámara de cine, poco; un móvil, bastante).':
+        'Film: 100 % = each layer with its own grain (somewhat correlated, as\nin real film); 0 % = grey grain. Sensor: how much of the noise is colour\n(a cinema camera, little; a phone, quite a lot).',
+    'Película: grano en la densidad del negativo, más en la capa azul.\nSensor: ruido de fotones, más visible en las sombras.':
+        'Film: grain in the density of the negative, strongest in the blue layer.\nSensor: photon noise, most visible in the shadows.',
+    'Personalizado':
+        'Custom',
+    'Punto medio':
+        'Midpoint',
+    'Quitar todo':
+        'Remove all',
+    'Quitar todos':
+        'Remove all',
+    'Radio en la película':
+        'Radius on the film',
+    'Reducción de ruido':
+        'Noise reduction',
+    'Rellenar el encuadre':
+        'Fill the frame',
+    'Reproducir':
+        'Play',
+    'Rojo':
+        'Red',
+    'Ruido de una full frame actual a esa sensibilidad (un móvil o una cámara\nde acción, con sensor pequeño, equivale a unos 5 pasos más).':
+        'Noise of a current full-frame camera at that sensitivity (a phone or an action\ncamera, with a small sensor, is about 5 stops more).',
+    'Réflex full frame, 50 mm f/1.4':
+        'Full-frame DSLR, 50 mm f/1.4',
+    'Saturación':
+        'Saturation',
+    'Sensibilidad':
+        'Sensitivity',
+    'Sensor digital':
+        'Digital sensor',
+    'Silenciar efectos (ver el original)':
+        'Mute effects (see the original)',
+    'Silenciar los efectos para ver el original (M).\nCada uno se queda como está; otra vez M los vuelve a poner.':
+        'Mute the effects to see the original (M).\nEach one stays as it is; M again brings them back.',
+    'Solo las luces más fuertes que esto dejan halo. En un PNG el blanco está a\nunos 2,5 pasos sobre el gris medio; en un EXR las luces pueden pasar de ahí.':
+        'Only highlights brighter than this leave a halo. In a PNG white sits about\n2.5 stops above middle grey; in an EXR highlights can go beyond that.',
+    'Super 8 (500T)':
+        'Super 8 (500T)',
+    'Super 8 (50D)':
+        'Super 8 (50D)',
+    'Tamaño del halo sobre el negativo: 0,1-0,2 mm con capa antihalo, 0,3-1 mm sin\nella. En 16 mm o Super 8 el mismo halo ocupa más de la imagen (usa el\nformato del grano).':
+        'Size of the halo on the negative: 0.1-0.2 mm with an anti-halation layer, 0.3-1 mm\nwithout it. In 16 mm or Super 8 the same halo covers more of the image (it uses the\ngauge set for the grain).',
+    'Tamaño real (100 %)':
+        'Actual size (100 %)',
+    'Temperatura':
+        'Temperature',
+    'Tinte':
+        'Tint',
+    'Tipo':
+        'Type',
+    'Una cámara completa: enciende los efectos que lleva con sus valores.\nDespués se puede retocar cada uno.':
+        'A complete camera: turns on its effects with their values.\nYou can then tweak each one.',
+    'Verde':
+        'Green',
+    'Verde (negativo) ↔ magenta (positivo), en perpendicular a la temperatura.\nCorrige la luz verdosa de fluorescentes y LED.':
+        'Green (negative) ↔ magenta (positive), perpendicular to temperature.\nFixes the greenish light of fluorescent tubes and LEDs.',
+    'Viñeteado':
+        'Vignetting',
+    'Doble clic o Ctrl+clic: valor neutro.':
+        'Double-click or Ctrl+click: neutral value.',
+    'Plegar o desplegar los ajustes':
+        'Collapse or expand the settings',
+    'Volver a los valores por defecto de este efecto':
+        'Back to this effect\'s default values',
 }

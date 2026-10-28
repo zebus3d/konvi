@@ -6,6 +6,8 @@ varios hilos y los guarda en RAM (hasta la mitad de la memoria libre) para repro
 tiempo real. Lo que Qt no sabe leer (EXR sin kimageformats, DPX…) lo lee ffmpeg.
 """
 
+import json
+import math
 import os
 import re
 import subprocess
@@ -14,13 +16,16 @@ from pathlib import Path
 
 import numpy as np
 
-from PySide6.QtCore import (QElapsedTimer, QObject, QPointF, QRectF, QRunnable, Qt,
+from PySide6.QtCore import (QElapsedTimer, QObject, QPointF, QRectF, QRunnable, QSettings, Qt,
                             QThreadPool, QTimer, Signal)
-from PySide6.QtGui import (QBrush, QColor, QColorSpace, QFont, QIcon, QImage, QImageReader,
-                           QPainter, QPixmap)
-from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel,
-                               QProgressBar, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtGui import (QActionGroup, QBrush, QColor, QColorSpace, QFont, QIcon, QImage,
+                           QImageReader, QPainter, QPixmap)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+                               QFormLayout, QFrame, QHBoxLayout, QLabel, QMenu, QProgressBar,
+                               QPushButton, QScrollArea, QSlider, QStyle, QStyleOptionSlider, QToolButton,
+                               QVBoxLayout, QWidget)
 
+from ..core import look as fx
 from ..i18n import number as fmt_number, tr
 
 APP = "Konvi"
@@ -384,29 +389,34 @@ def _alpha_lut():
     return _luts["alpha"]
 
 
-_bands_pool = ThreadPoolExecutor(max(2, min(8, (os.cpu_count() or 4) // 2)))
-
-
 def _by_bands(height, work):
     """Reparte el trabajo por franjas de filas entre varios hilos (numpy suelta el GIL): un
     1080p en coma flotante pasa de ~34 ms a ~11 ms y cabe en lo que dura un fotograma."""
-    step = max(64, -(-height // _bands_pool._max_workers))
-    list(_bands_pool.map(lambda y: work(slice(y, y + step)), range(0, height, step)))
+    fx.by_bands(height, work, rows=64)
 
 
-def develop(image, exposure=0.0, gamma=1.0, channel="rgb"):
-    """Lo que se pinta: el fotograma con la exposición y la gamma de la vista, y solo el canal
-    elegido (en gris). Una imagen de 8 bits sin tocar nada se devuelve tal cual."""
+def develop(image, exposure=0.0, gamma=1.0, channel="rgb", look=None, frame=0):
+    """Lo que se pinta: el fotograma con los efectos de cámara (si hay), la exposición y la
+    gamma de la vista, y solo el canal elegido (en gris). Una imagen de 8 bits sin tocar nada
+    se devuelve tal cual."""
+    has_alpha = image.hasAlphaChannel() and channel == "rgb"
+    if look is not None and look.active():
+        # con efectos se revela como un EXR: lineal en media precisión, por la misma tabla
+        rgba = look.apply(linear_rgba(image), frame)
+        half = np.empty(rgba.shape, np.float16)
+        _by_bands(rgba.shape[0], lambda rows: np.copyto(half[rows], rgba[rows], casting="unsafe"))
+        return _reveal(half.view(np.uint16), True, has_alpha, exposure, gamma, channel)
     hdr = is_hdr(image)
     if not hdr and exposure == 0 and gamma == 1 and channel == "rgb":
         return image
-    has_alpha = image.hasAlphaChannel() and channel == "rgb"
     if not hdr:
         image = image.convertToFormat(QImage.Format_RGBA8888)
-    dtype = np.uint16 if hdr else np.uint8
-    w, h, size = image.width(), image.height(), np.dtype(dtype).itemsize
-    src = np.frombuffer(image.constBits(), dtype, count=h * image.bytesPerLine() // size)
-    src = src.reshape(h, image.bytesPerLine() // size)[:, :w * 4].reshape(h, w, 4)
+    return _reveal(_pixels(image, np.uint16 if hdr else np.uint8), hdr, has_alpha, exposure, gamma, channel)
+
+
+def _reveal(src, hdr, has_alpha, exposure, gamma, channel):
+    """src: (alto, ancho, 4) en 8 bits o los bits de un half → QImage de 8 bits para pintar."""
+    h, w = src.shape[:2]
     lut = _alpha_lut() if channel == "a" else view_lut(hdr, exposure, gamma)
     out = np.empty((h, w, 4), np.uint8)
 
@@ -428,6 +438,59 @@ def develop(image, exposure=0.0, gamma=1.0, channel="rgb"):
     _by_bands(h, work)
     fmt = QImage.Format_ARGB32_Premultiplied if has_alpha else QImage.Format_RGB32
     return QImage(out.data, w, h, w * 4, QImage.Format_RGBA8888).convertToFormat(fmt)
+
+
+# ------------------------------------------------------------------ lineal, para los efectos
+
+def _srgb_decode(v):
+    return np.where(v <= 0.04045, v / 12.92, np.power((v + 0.055) / 1.055, 2.4))
+
+
+_DECODE8 = _srgb_decode(np.arange(256, dtype=np.float32) / 255).astype(np.float32)
+_DECODE16 = None
+DEEP_FORMATS = {QImage.Format_RGBA64, QImage.Format_RGBA64_Premultiplied, QImage.Format_RGBX64,
+                QImage.Format_Grayscale16}
+
+
+def _pixels(image, dtype):
+    """Los píxeles del QImage, sin copiar: el QImage tiene que seguir vivo mientras se usen."""
+    w, h, size = image.width(), image.height(), np.dtype(dtype).itemsize
+    src = np.frombuffer(image.constBits(), dtype, count=h * image.bytesPerLine() // size)
+    return src.reshape(h, image.bytesPerLine() // size)[:, :w * 4].reshape(h, w, 4)
+
+
+def linear_rgba(image):
+    """El fotograma como float32 (alto, ancho, 4) en luz lineal, sin premultiplicar."""
+    global _DECODE16
+    if is_hdr(image):
+        return _pixels(image, np.float16).astype(np.float32)
+    if image.format() in DEEP_FORMATS:
+        if _DECODE16 is None:
+            _DECODE16 = _srgb_decode(np.arange(65536, dtype=np.float32) / 65535).astype(np.float32)
+        image = image.convertToFormat(QImage.Format_RGBA64)    # que viva mientras se lee
+        px = _pixels(image, np.uint16)
+        out = np.take(_DECODE16, px)
+        out[..., 3] = px[..., 3] / np.float32(65535)
+        return out
+    image = image.convertToFormat(QImage.Format_RGBA8888)
+    px = _pixels(image, np.uint8)
+    out = np.empty(px.shape, np.float32)
+
+    def work(rows):
+        np.take(_DECODE8, px[rows], out=out[rows])
+        out[rows, :, 3] = px[rows, :, 3] * np.float32(1 / 255)
+
+    _by_bands(px.shape[0], work)
+    return out
+
+
+def half_image(rgba):
+    """De vuelta a un QImage lineal en coma flotante, que es lo que revela develop()."""
+    h, w = rgba.shape[:2]
+    half = np.ascontiguousarray(np.nan_to_num(rgba, nan=0.0, posinf=65504.0), dtype=np.float16)
+    image = QImage(half.data, w, h, w * 8, QImage.Format_RGBA16FPx4).copy()
+    image.setColorSpace(QColorSpace(QColorSpace.SRgbLinear))
+    return image
 
 
 # ------------------------------------------------------------------ widgets
@@ -455,6 +518,7 @@ class Viewer(QWidget):
     scrub_moved = Signal(float)         # píxeles en horizontal desde donde se pulsó
     scrub_finished = Signal()
     clicked = Signal()              # clic quieto, sin arrastrar
+    menu_requested = Signal(object)     # clic derecho: posición global
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -469,6 +533,9 @@ class Viewer(QWidget):
         self.exposure = 0.0         # pasos de diafragma, en lineal
         self.gamma = 1.0
         self.channel = "rgb"        # o solo "r", "g", "b", "a" (en gris)
+        self.look = fx.Look()       # efectos de cámara
+        self.bypass = False         # ver sin efectos (antes / después)
+        self.frame = 0              # número del fotograma, para que el grano sea siempre el mismo
         self._developed = None      # (clave, imagen) del último fotograma revelado
         self._drag = None               # encuadre (botón central)
         self._scrub_x = None            # recorrer la secuencia (botón izquierdo)
@@ -511,10 +578,16 @@ class Viewer(QWidget):
 
     def displayed(self):
         """El fotograma tal como se ve, revelado una sola vez aunque se repinte muchas."""
-        key = (self.image.cacheKey(), self.exposure, self.gamma, self.channel)
+        look = None if self.bypass or not self.look.active() else self.look
+        key = (self.image.cacheKey(), self.exposure, self.gamma, self.channel,
+               look and look.key(), look and self.frame)
         if self._developed is None or self._developed[0] != key:
-            self._developed = (key, develop(self.image, self.exposure, self.gamma, self.channel))
+            self._developed = (key, develop(self.image, self.exposure, self.gamma, self.channel,
+                                            look, self.frame))
         return self._developed[1]
+
+    def contextMenuEvent(self, event):
+        self.menu_requested.emit(event.globalPos())
 
     def _paint(self, p):
         p.fillRect(self.rect(), QColor("#1b1b1b"))
@@ -640,6 +713,436 @@ class Timeline(QWidget):
         self.released.emit()
 
 
+class JumpSlider(QSlider):
+    """Un deslizador que salta adonde se pincha en la barra (no hay que apuntar a la bolita)
+    y desde ahí se sigue arrastrando. Ctrl+clic pide volver al valor por defecto."""
+
+    reset_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and event.modifiers() & Qt.ControlModifier:
+            self.reset_requested.emit()
+            return
+        if event.button() == Qt.LeftButton:
+            opt = QStyleOptionSlider()
+            self.initStyleOption(opt)
+            style = self.style()
+            handle = style.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
+            if not handle.contains(event.position().toPoint()):
+                groove = style.subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
+                x = event.position().x() - groove.x() - handle.width() / 2
+                span = max(1, groove.width() - handle.width())
+                self.setValue(QStyle.sliderValueFromPosition(self.minimum(), self.maximum(),
+                                                             round(x), span, opt.upsideDown))
+        super().mousePressEvent(event)      # con la bolita ya debajo, empieza a arrastrar
+
+
+class ValueRow(QWidget):
+    """Un ajuste numérico: deslizador y casilla, enlazados. Doble clic en el nombre lo devuelve
+    a su valor por defecto."""
+
+    changed = Signal(float)
+
+    def __init__(self, label, lo, hi, step, decimals, default, suffix="", tooltip="", scale=1.0):
+        super().__init__()
+        self.default, self.scale = default, scale       # scale: lo que se ve / lo que se guarda
+        self.label = QLabel(label)
+        self.label.setToolTip((tooltip + "\n" if tooltip else "") +
+                              tr("Doble clic aquí o Ctrl+clic en el deslizador para volver a {value}.",
+                                 value=fmt_number(default * scale, decimals) + suffix))
+        self.label.mouseDoubleClickEvent = lambda e: self.set_value(self.default, emit=True)
+        self._mult = 10 ** decimals
+        self.slider = JumpSlider()
+        self.slider.reset_requested.connect(lambda: self.set_value(self.default, emit=True))
+        self.slider.setRange(round(lo * self._mult), round(hi * self._mult))
+        self.slider.setFocusPolicy(Qt.NoFocus)
+        self.spin = QDoubleSpinBox()
+        self.spin.setRange(lo, hi)
+        self.spin.setSingleStep(step)
+        self.spin.setDecimals(decimals)
+        self.spin.setSuffix(suffix)
+        self.spin.setFocusPolicy(Qt.ClickFocus)
+        for w in (self.slider, self.spin):
+            w.setToolTip(self.label.toolTip())
+        self.slider.valueChanged.connect(lambda v: self.spin.setValue(v / self._mult))
+        self.spin.valueChanged.connect(self._spin_changed)
+        grid = QVBoxLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(0)
+        grid.addWidget(self.label)
+        row = QHBoxLayout()
+        row.addWidget(self.slider, 1)
+        row.addWidget(self.spin)
+        grid.addLayout(row)
+        self.set_value(default)
+
+    def _spin_changed(self, v):
+        self.slider.blockSignals(True)
+        self.slider.setValue(round(v * self._mult))
+        self.slider.blockSignals(False)
+        self.changed.emit(v / self.scale)
+
+    def value(self):
+        return self.spin.value() / self.scale
+
+    def set_value(self, v, emit=False):
+        self.blockSignals(not emit)
+        self.spin.setValue(v * self.scale)
+        self.blockSignals(False)
+
+
+class LookPanel(QWidget):
+    """Barra lateral con los efectos de cámara: cada uno con su casilla para encenderlo y sus
+    ajustes debajo (solo se ven los de los que están encendidos), y las cámaras completas
+    arriba. Los valores por defecto son los de un objetivo y una película reales (ver
+    seqview_look.py)."""
+
+    changed = Signal()
+    folding_changed = Signal()          # se ha plegado o desplegado una sección
+    mute_toggled = Signal(bool)
+    done_editing = Signal()             # el teclado vuelve al visor
+
+    TITLES = {"distortion": "Distorsión", "aberration": "Aberración cromática",
+              "vignette": "Viñeteado", "halation": "Halación", "grain": "Grano / ruido",
+              "grade": "Color, brillo y contraste"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._loading = False
+        self.boxes, self.bodies, self.rows = {}, {}, {}
+        self.arrows, self.expanded = {}, {}
+
+        self.preset = QComboBox()
+        self.preset.addItem(tr("Personalizado"))
+        for name in fx.PRESETS:
+            self.preset.addItem(tr(name), name)
+        self.preset.setToolTip(tr("Una cámara completa: enciende los efectos que lleva con sus valores.\n"
+                               "Después se puede retocar cada uno."))
+        self.preset.setFocusPolicy(Qt.ClickFocus)
+        self.preset.activated.connect(self._preset_chosen)
+
+        content = QWidget()
+        col = QVBoxLayout(content)
+        col.setContentsMargins(10, 8, 10, 8)
+        col.setSpacing(6)
+        self.title = QLabel(tr("Efectos de cámara"))
+        f = self.title.font()
+        f.setBold(True)
+        f.setPointSizeF(f.pointSizeF() * 1.15)
+        self.title.setFont(f)
+        # silenciar: se ven sin efectos, pero cada uno conserva si está encendido y sus valores
+        self.mute = QToolButton()
+        self.mute.setCheckable(True)
+        self.mute.setAutoRaise(True)
+        self.mute.setFocusPolicy(Qt.NoFocus)
+        self.mute.toggled.connect(self._mute_changed)
+        header = QHBoxLayout()
+        header.addWidget(self.title, 1)
+        header.addWidget(self.mute)
+        col.addLayout(header)
+        col.addWidget(QLabel(tr("Cámara")))
+        col.addWidget(self.preset)
+
+        D = fx.DEFAULTS
+        self._section(col, "distortion", [
+            ("amount", ValueRow(tr("Cantidad (TV distortion)"), -40, 15, 0.1, 1, D["distortion"]["amount"], " %",
+                                tr("Negativo = barril (las rectas se curvan hacia fuera), positivo = cojín.\n"
+                                "Un 50 mm f/1.4 da -1 a -1,3 %; una GoPro sin corregir («Wide»), unos -30 %.\n"
+                                "(Las cifras de LensTip son la distorsión en la esquina: divídelas por 1,4-1,5.)")))],
+            extra=self._fill_box())
+        self._section(col, "aberration", [
+            ("amount", ValueRow(tr("Cantidad"), -2, 2, 0.01, 2, D["aberration"]["amount"], " %",
+                                tr("Aberración cromática lateral, en % de la distancia del centro a la esquina\n"
+                                "(la medida de Imatest y LensTip): 0,04 % es baja, 0,08 % entre baja y media,\n"
+                                "0,12 % media. Negativo cambia qué color queda por fuera.")))])
+        self._section(col, "vignette", [
+            # se enseña en positivo (pasos que se pierden): a la derecha, más oscuro
+            ("amount", ValueRow(tr("Cantidad (pasos que pierde la esquina)"), -2, 4, 0.1, 1, D["vignette"]["amount"], " EV",
+                                tr("Pasos de luz que se pierden en la esquina: a la derecha, más oscuro.\n"
+                                "Un 50 mm f/1.4 abierto pierde entre 0,75 y 3 (mediana de LensTip: 1,3);\n"
+                                "cerrado a f/4, medio paso. Por debajo de 0 aclara los bordes."), scale=-1)),
+            ("midpoint", ValueRow(tr("Punto medio"), 0, 90, 1, 0, 0, " %",
+                                  tr("Hasta dónde se deja el centro sin oscurecer. 0 = como un objetivo."), scale=100)),
+            ("roundness", ValueRow(tr("Forma: redonda → cuadrada"), 0, 100, 1, 0, 0, " %",
+                                   tr("0 = círculo; 100 = un cuadrado con las esquinas redondeadas."), scale=100)),
+            ("fit", ValueRow(tr("Encuadre: círculo → elipse"), 0, 100, 1, 0, 0, " %",
+                             tr("0 = redondo, como un objetivo de verdad (las esquinas quedan más oscuras que\n"
+                             "los lados); 100 = estirado a la forma de la imagen."), scale=100))])
+        self._section(col, "halation", [
+            ("amount", ValueRow(tr("Cantidad"), 0, 30, 0.5, 1, D["halation"]["amount"], " %",
+                                tr("Cuánta luz vuelve rebotada del soporte. Un negativo de cine con su capa\n"
+                                "antihalo: 1-3 %. Sin ella (CineStill y parecidas): 10-20 %."), scale=100)),
+            ("radius", ValueRow(tr("Radio en la película"), 0.05, 1.5, 0.05, 2, D["halation"]["radius"], " mm",
+                                tr("Tamaño del halo sobre el negativo: 0,1-0,2 mm con capa antihalo, 0,3-1 mm sin\n"
+                                "ella. En 16 mm o Super 8 el mismo halo ocupa más de la imagen (usa el\n"
+                                "formato del grano)."))),
+            ("threshold", ValueRow(tr("Desde (pasos sobre el gris medio)"), 0, 8, 0.5, 1, D["halation"]["threshold"], " EV",
+                                   tr("Solo las luces más fuertes que esto dejan halo. En un PNG el blanco está a\n"
+                                   "unos 2,5 pasos sobre el gris medio; en un EXR las luces pueden pasar de ahí.")))])
+        self.kind = QComboBox()
+        self.kind.addItems([tr("Película"), tr("Sensor digital")])
+        self.stock = QComboBox()
+        for key, (name, _) in fx.STOCKS.items():
+            self.stock.addItem(f"Kodak {name}", key)
+        self.gauge = QComboBox()
+        for key, (name, _) in fx.GAUGES.items():
+            self.gauge.addItem(name, key)
+        self.iso = QComboBox()
+        for iso in fx.ISOS:
+            self.iso.addItem(f"ISO {iso}", iso)
+        self.kind.setToolTip(tr("Película: grano en la densidad del negativo, más en la capa azul.\n"
+                             "Sensor: ruido de fotones, más visible en las sombras."))
+        self.stock.setToolTip(tr("El grano de cada emulsión sale de las curvas de granularidad de Kodak."))
+        self.gauge.setToolTip(tr("El mismo negativo en un fotograma más pequeño se amplía más: más grano y más grueso."))
+        self.iso.setToolTip(tr("Ruido de una full frame actual a esa sensibilidad (un móvil o una cámara\n"
+                            "de acción, con sensor pequeño, equivale a unos 5 pasos más)."))
+        combos = QWidget()
+        form = QFormLayout(combos)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.addRow(tr("Tipo"), self.kind)
+        form.addRow(tr("Emulsión"), self.stock)
+        form.addRow(tr("Formato"), self.gauge)
+        form.addRow(tr("Sensibilidad"), self.iso)
+        self._grain_form = form
+        for c in (self.kind, self.stock, self.gauge, self.iso):
+            c.setFocusPolicy(Qt.ClickFocus)
+            c.activated.connect(self._emit)
+        self._section(col, "grain", [
+            ("amount", ValueRow(tr("Cantidad"), 0, 300, 5, 0, 1.0, " %",
+                                tr("100 % = lo que da esa película o ese sensor de verdad."), scale=100)),
+            ("color", ValueRow(tr("Color"), 0, 100, 5, 0, 1.0, " %",
+                               tr("Película: 100 % = cada capa con su grano (algo correlado entre capas, como\n"
+                               "en la real); 0 % = grano en gris. Sensor: cuánto del ruido es de color\n"
+                               "(una cámara de cine, poco; un móvil, bastante)."), scale=100)),
+            ("nr", ValueRow(tr("Reducción de ruido"), 0, 100, 5, 0, 0.0, " %",
+                            tr("La que hacen un móvil o una cámara de acción: menos ruido de luminancia y\n"
+                            "el de color en manchas más grandes y suaves. 0 % = una cámara grande."),
+                            scale=100))],
+            extra=combos, extra_first=True)
+        self._section(col, "grade", [
+            ("temperature", ValueRow(tr("Temperatura"), 2000, 12000, 100, 0, 6500.0, " K",
+                                     tr("Balance de blancos, como en la cámara o en Lightroom: de qué color era la\n"
+                                     "luz. 3200 K (bombilla) enfría la imagen para compensarla; por encima de\n"
+                                     "6500 K (luz de día nublado) se calienta."))),
+            ("tint", ValueRow(tr("Tinte"), -100, 100, 1, 0, 0.0, "",
+                              tr("Verde (negativo) ↔ magenta (positivo), en perpendicular a la temperatura.\n"
+                              "Corrige la luz verdosa de fluorescentes y LED."))),
+            ("exposure", ValueRow(tr("Brillo"), -4, 4, 0.1, 1, 0.0, " EV",
+                                  tr("Pasos de luz: +1 dobla la luz, -1 la reduce a la mitad."))),
+            ("contrast", ValueRow(tr("Contraste"), 25, 200, 5, 0, 1.0, " %",
+                                  tr("Alrededor del gris medio, como en un etalonaje: el gris no se mueve, las\n"
+                                  "luces suben y las sombras bajan. 100 % = sin cambio."), scale=100)),
+            ("gamma", ValueRow(tr("Gamma"), 0.2, 2, 0.05, 2, 1.0, "",
+                               tr("Más de 1 aclara los medios tonos, menos de 1 los oscurece; el negro y el\n"
+                               "blanco no se mueven."))),
+            ("saturation", ValueRow(tr("Saturación"), 0, 200, 5, 0, 1.0, " %",
+                                    tr("0 % = blanco y negro; 100 % = sin cambio. La luminancia no cambia."),
+                                    scale=100))])
+        col.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # sin barra horizontal, el panel tiene que medir lo que pide su contenido (con el estilo
+        # que toque: en Breeze las casillas y los desplegables son más anchos que en Fusion) más
+        # la barra vertical; si no, se corta por la derecha
+        for combo in (self.preset, self.kind, self.stock, self.gauge, self.iso):
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(14)
+        # todas las casillas del mismo ancho (el que pide la más larga, «-25,0 %» con sus
+        # flechas), para que los deslizadores queden alineados
+        spin_w = max(row.spin.sizeHint().width() for row in self.rows.values())
+        for row in self.rows.values():
+            row.spin.setFixedWidth(spin_w)
+        content.adjustSize()
+        bar = scroll.style().pixelMetric(scroll.style().PixelMetric.PM_ScrollBarExtent)
+        self.setFixedWidth(max(280, content.minimumSizeHint().width() + bar + 2 * scroll.frameWidth() + 4))
+
+        reset = QPushButton(tr("Quitar todo"))
+        reset.setToolTip(tr("Apaga todos los efectos y vuelve a los valores por defecto"))
+        reset.setFocusPolicy(Qt.NoFocus)
+        reset.clicked.connect(lambda: self.set_settings(fx.default_settings(), emit=True))
+
+        bottom = QVBoxLayout()
+        bottom.setContentsMargins(10, 6, 10, 8)
+        bottom.addWidget(reset)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(scroll, 1)
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        outer.addWidget(line)
+        outer.addLayout(bottom)
+        self.set_settings(fx.default_settings())
+        self._mute_changed(False)
+
+    def _mute_changed(self, muted):
+        self.mute.setIcon(icon("eye-off" if muted else "eye"))
+        self.mute.setToolTip((tr("Efectos silenciados: se ve el original. Clic o M para volver a verlos.")
+                              if muted else tr("Silenciar los efectos para ver el original (M).\n"
+                                            "Cada uno se queda como está; otra vez M los vuelve a poner.")))
+        self.title.setText(tr("Efectos de cámara — silenciados") if muted else tr("Efectos de cámara"))
+        self.title.setEnabled(not muted)
+        self.mute_toggled.emit(muted)
+
+    def _fill_box(self):
+        self.fill = QCheckBox(tr("Rellenar el encuadre"))
+        self.fill.setToolTip(tr("Acerca la imagen lo justo para que no queden esquinas vacías,\n"
+                             "como hace la cámara al corregir o al grabar recortando el sensor."))
+        self.fill.setFocusPolicy(Qt.NoFocus)
+        self.fill.toggled.connect(self._emit)
+        return self.fill
+
+    def _section(self, col, effect, rows, extra=None, extra_first=False):
+        box = QCheckBox(tr(self.TITLES[effect]))
+        f = box.font()
+        f.setBold(True)
+        box.setFont(f)
+        box.setFocusPolicy(Qt.NoFocus)
+        body = QWidget()
+        lay = QVBoxLayout(body)
+        lay.setContentsMargins(22, 0, 0, 6)
+        lay.setSpacing(4)
+        if extra is not None and extra_first:
+            lay.addWidget(extra)
+        for key, row in rows:
+            lay.addWidget(row)
+            row.changed.connect(self._emit)
+            row.spin.editingFinished.connect(self.done_editing)
+            self.rows[(effect, key)] = row
+        if extra is not None and not extra_first:
+            lay.addWidget(extra)
+        # la flecha pliega los ajustes para que el panel no se haga tan largo
+        arrow = QToolButton()
+        arrow.setAutoRaise(True)
+        arrow.setFocusPolicy(Qt.NoFocus)
+        arrow.setToolTip(tr("Plegar o desplegar los ajustes"))
+        arrow.clicked.connect(lambda: self.set_expanded(effect, not self.expanded[effect]))
+        box.toggled.connect(lambda on: self._effect_toggled(effect, on))
+        box.toggled.connect(self._emit)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        reset = QToolButton()
+        reset.setIcon(icon("retry"))
+        reset.setAutoRaise(True)
+        reset.setFocusPolicy(Qt.NoFocus)
+        reset.setToolTip(tr("Volver a los valores por defecto de este efecto"))
+        reset.clicked.connect(lambda: self.reset_effect(effect))
+        header = QHBoxLayout()
+        header.setSpacing(2)
+        header.addWidget(arrow)
+        header.addWidget(box, 1)
+        header.addWidget(reset)
+        col.addWidget(sep)
+        col.addLayout(header)
+        col.addWidget(body)
+        self.boxes[effect], self.bodies[effect], self.arrows[effect] = box, body, arrow
+        self.expanded[effect] = True
+        self._refresh_section(effect)
+
+    def settings(self):
+        out = fx.default_settings()
+        for effect in fx.EFFECTS:
+            out[effect]["on"] = self.boxes[effect].isChecked()
+        for (effect, key), row in self.rows.items():
+            out[effect][key] = round(row.value(), 4)
+        out["distortion"]["fill"] = self.fill.isChecked()
+        g = out["grain"]
+        g["kind"] = "film" if self.kind.currentIndex() == 0 else "digital"
+        g["stock"], g["gauge"], g["iso"] = self.stock.currentData(), self.gauge.currentData(), self.iso.currentData()
+        return out
+
+    def set_settings(self, settings, emit=False):
+        s = fx.merged(settings)
+        self._loading = True
+        for effect in fx.EFFECTS:
+            self.boxes[effect].blockSignals(True)
+            self.boxes[effect].setChecked(s[effect]["on"])
+            self.boxes[effect].blockSignals(False)
+            self._refresh_section(effect)
+        for (effect, key), row in self.rows.items():
+            row.set_value(s[effect][key])
+        self.fill.setChecked(s["distortion"]["fill"])
+        g = s["grain"]
+        self.kind.setCurrentIndex(0 if g["kind"] == "film" else 1)
+        for combo, value in ((self.stock, g["stock"]), (self.gauge, g["gauge"]), (self.iso, g["iso"])):
+            i = combo.findData(value)
+            combo.setCurrentIndex(i if i >= 0 else 0)
+        self._loading = False
+        self._sync()
+        if emit:
+            self.changed.emit()
+
+    def _refresh_section(self, effect):
+        """Los ajustes se ven si el efecto está encendido y su sección desplegada."""
+        open_ = self.expanded[effect]
+        self.arrows[effect].setArrowType(Qt.DownArrow if open_ else Qt.RightArrow)
+        self.arrows[effect].setEnabled(self.boxes[effect].isChecked())
+        self.bodies[effect].setVisible(self.boxes[effect].isChecked() and open_)
+
+    def _effect_toggled(self, effect, on):
+        if on:
+            self.expanded[effect] = True        # al encender un efecto, se ven sus ajustes
+            self.mute.setChecked(False)         # y se ve el efecto, aunque estuvieran silenciados
+        self._refresh_section(effect)
+
+    def set_expanded(self, effect, open_):
+        self.expanded[effect] = open_
+        self._refresh_section(effect)
+        self.folding_changed.emit()
+
+    def folded(self):
+        return [e for e in fx.EFFECTS if not self.expanded[e]]
+
+    def set_folded(self, effects):
+        for e in fx.EFFECTS:
+            self.expanded[e] = e not in effects
+            self._refresh_section(e)
+
+    def reset_effect(self, effect):
+        """Los valores por defecto de un efecto, sin apagarlo ni tocar los demás."""
+        settings = self.settings()
+        on = settings[effect]["on"]
+        settings[effect] = fx.default_settings()[effect]
+        settings[effect]["on"] = on
+        self.set_settings(settings, emit=True)
+
+    def set_effect(self, effect, on):
+        self.boxes[effect].setChecked(on)
+
+    def apply_preset(self, name):
+        """Elegir una cámara es querer verla: si los efectos estaban silenciados, dejan de estarlo."""
+        self.set_settings(fx.preset_settings(name), emit=True)
+        self.mute.setChecked(False)
+
+    def _preset_chosen(self, index):
+        if index > 0:
+            self.apply_preset(self.preset.itemData(index))
+        self.done_editing.emit()
+
+    def _sync(self):
+        film = self.kind.currentIndex() == 0
+        for w, show in ((self.stock, film), (self.gauge, film), (self.iso, not film)):
+            self._grain_form.setRowVisible(w, show)
+        self.rows[("grain", "nr")].setVisible(not film)
+        name = fx.matching_preset(self.settings())
+        self.preset.setCurrentIndex(self.preset.findData(name) if name else 0)
+
+    def _emit(self, *_):
+        if self._loading:
+            return
+        self._sync()
+        self.changed.emit()
+
+
 def icon(name):
     return QIcon(str(ICONS / f"{name}.svg"))
 
@@ -653,6 +1156,39 @@ def tool_button(name, tooltip, slot, checkable=False):
     b.setCheckable(checkable)
     (b.toggled if checkable else b.clicked).connect(slot)
     return b
+
+
+def view_slider(box, log=False):
+    """Un deslizador pegado a la casilla de exposición o de gamma. La gamma va en escala
+    logarítmica, para que 1 quede en el centro (0,2 y 5 en los extremos). Doble clic: valor
+    neutro."""
+    slider = JumpSlider()
+    slider.setFixedWidth(60)            # cortito: la casilla de al lado es para afinar
+    slider.setFocusPolicy(Qt.NoFocus)
+    slider.setToolTip(box.toolTip() + "\n" + tr("Doble clic o Ctrl+clic: valor neutro."))
+    lo, hi = box.minimum(), box.maximum()
+    if log:
+        to_slider = lambda v: round(math.log(v, hi) * 100)
+        from_slider = lambda i: hi ** (i / 100)
+        slider.setRange(-100, 100)
+        neutral = 1.0
+    else:
+        to_slider = lambda v: round(v * 10)
+        from_slider = lambda i: i / 10
+        slider.setRange(round(lo * 10), round(hi * 10))
+        neutral = 0.0
+
+    def from_box(v):
+        slider.blockSignals(True)
+        slider.setValue(to_slider(v))
+        slider.blockSignals(False)
+
+    box.valueChanged.connect(from_box)
+    slider.valueChanged.connect(lambda i: box.setValue(from_slider(i)))
+    slider.mouseDoubleClickEvent = lambda e: box.setValue(neutral)
+    slider.reset_requested.connect(lambda: box.setValue(neutral))
+    from_box(box.value())
+    return slider
 
 
 class Player(QWidget):
@@ -677,6 +1213,18 @@ class Player(QWidget):
 
         self.viewer = Viewer()
         self.timeline = Timeline(self.cache)
+        self.prefs = QSettings("konvi", "konvi")
+        self.panel = LookPanel()
+        try:
+            self.panel.set_settings(json.loads(self.prefs.value("seqview/look", "{}")))
+        except (TypeError, ValueError):
+            pass
+        self.viewer.look.set(self.panel.settings())
+        folded = self.prefs.value("seqview/look_folded", "")
+        self.panel.set_folded(folded.split(",") if isinstance(folded, str) and folded else [])
+        self.panel.folding_changed.connect(
+            lambda: self.prefs.setValue("seqview/look_folded", ",".join(self.panel.folded())))
+        self.panel.setVisible(self.prefs.value("seqview/look_panel", False, type=bool))
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.timeout.connect(self._tick)
@@ -684,6 +1232,13 @@ class Player(QWidget):
         self.btn_play = tool_button("play", tr("Reproducir / pausa (Espacio)"), self.toggle_play)
         self.btn_loop = tool_button("loop", tr("Repetir en bucle (L)"), self._set_loop, True)
         self.btn_loop.setChecked(True)
+        self.btn_look = tool_button("camera", tr("Efectos de cámara: distorsión, aberración cromática,\n"
+                                                 "viñeteado, halación, grano y color (V)"),
+                                    self.panel.setVisible, True)
+        self.btn_look.setChecked(self.panel.isVisible())
+        self.panel.changed.connect(self._look_changed)
+        self.panel.mute_toggled.connect(self._mute)
+        self.panel.done_editing.connect(self.setFocus)
         self.btn_refresh = tool_button("refresh", tr("Buscar fotogramas nuevos o cambiados (Ctrl+R, F5)\n"
                                                      "Para ver un render que sigue en marcha sin volver a abrirlo."),
                                        self.refresh)
@@ -755,7 +1310,8 @@ class Player(QWidget):
                   tool_button("next", tr("Fotograma siguiente (→)"), lambda: self.step(1)),
                   tool_button("last", tr("Último fotograma (Fin)"), lambda: self.seek(len(self.paths) - 1)),
                   self.btn_loop,
-                  self.btn_refresh):
+                  self.btn_refresh,
+                  self.btn_look):
             controls.addWidget(b)
         controls.addSpacing(8)
         controls.addWidget(self.frame_label)
@@ -764,9 +1320,11 @@ class Player(QWidget):
         controls.addWidget(self.fps_box)
         controls.addSpacing(12)
         controls.addWidget(QLabel(tr("Exp.")))
+        controls.addWidget(view_slider(self.exposure_box))
         controls.addWidget(self.exposure_box)
         controls.addSpacing(8)
         controls.addWidget(QLabel("γ"))
+        controls.addWidget(view_slider(self.gamma_box, log=True))
         controls.addWidget(self.gamma_box)
         controls.addSpacing(8)
         controls.addWidget(self.channel_box)
@@ -777,12 +1335,17 @@ class Player(QWidget):
         controls.addSpacing(8)
         controls.addWidget(self.info_label)
 
-        layout = QVBoxLayout(self)
+        main = QVBoxLayout()
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+        main.addWidget(self.viewer, 1)
+        main.addWidget(self.timeline)
+        main.addLayout(controls)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.viewer, 1)
-        layout.addWidget(self.timeline)
-        layout.addLayout(controls)
+        layout.addLayout(main, 1)
+        layout.addWidget(self.panel)
 
         self.cache.frame_ready.connect(self._on_frame_ready)
         self.cache.changed.connect(self._refresh_status)
@@ -795,6 +1358,11 @@ class Player(QWidget):
         self.viewer.scrub_moved.connect(self._scrub_drag)
         self.viewer.scrub_finished.connect(self._scrub_end)
         self.viewer.clicked.connect(self._click)
+        self.viewer.menu_requested.connect(self._context_menu)
+        # al abrir, los efectos guardados vienen silenciados: se ve el render tal cual y con M
+        # (o el ojo del panel) vuelven tal como se dejaron
+        if self.viewer.look.active():
+            self.panel.mute.setChecked(True)
         self.open(paths)
 
     # ---- abrir
@@ -944,6 +1512,7 @@ class Player(QWidget):
             self.viewer.set_image(None, tr("No se pudo leer {name}\n{error}", name=self.paths[self.current].name,
                                            error=self.cache.errors[self.current]))
         # si aún no está, se queda el anterior hasta que llegue (_on_frame_ready)
+        self.viewer.frame = frame_number(self.paths[self.current], self.current)
         self.timeline.current = self.current
         self.timeline.update()
         self._refresh_status()
@@ -1064,6 +1633,78 @@ class Player(QWidget):
         self.exposure_box.setValue(0.0)
         self.gamma_box.setValue(1.0)
 
+    # ---- efectos de cámara
+
+    def _look_changed(self):
+        self.viewer.look.set(self.panel.settings())
+        self.viewer.update()
+        self.prefs.setValue("seqview/look", json.dumps(self.panel.settings()))
+
+    def _mute(self, on):
+        self.viewer.bypass = on
+        if self.viewer.look.active():       # con el panel cerrado, que se sepa qué se está viendo
+            self._show_notice(tr("Efectos silenciados (M)") if on else tr("Efectos activos"))
+        self.viewer.update()
+
+    def toggle_panel(self):
+        self.btn_look.toggle()
+
+    def _context_menu(self, pos):
+        menu = QMenu(self)
+
+        def add(text, slot, shortcut="", checked=None, enabled=True, target=menu):
+            action = target.addAction(text)
+            if shortcut:
+                action.setShortcut(shortcut)        # solo para que se vea la tecla
+            if checked is not None:
+                action.setCheckable(True)
+                action.setChecked(checked)
+            action.setEnabled(enabled)
+            action.triggered.connect(slot)
+            return action
+
+        add(tr("Pausa") if self.timer.isActive() else tr("Reproducir"), self.toggle_play, "Space")
+        menu.addSeparator()
+        effects = menu.addMenu(icon("camera"), tr("Efectos de cámara"))
+        add(tr("Panel de efectos"), self.toggle_panel, "V", self.panel.isVisible(), target=effects)
+        add(tr("Silenciar efectos (ver el original)"), self.panel.mute.toggle, "M",
+            self.viewer.bypass, target=effects)
+        effects.addSeparator()
+        settings = self.panel.settings()
+        for effect in fx.EFFECTS:
+            add(tr(LookPanel.TITLES[effect]), lambda on, e=effect: self.panel.set_effect(e, on),
+                checked=settings[effect]["on"], target=effects)
+        effects.addSeparator()
+        cameras = effects.addMenu(tr("Cámara"))
+        current = fx.matching_preset(settings)
+        presets = QActionGroup(cameras)         # se marcan como opciones, una sola a la vez
+        for name in fx.PRESETS:
+            presets.addAction(add(tr(name), lambda _=False, n=name: self.panel.apply_preset(n),
+                                  checked=name == current, target=cameras))
+        add(tr("Quitar todos"), lambda: self.panel.set_settings(fx.default_settings(), emit=True),
+            enabled=self.viewer.look.active(), target=effects)
+        channels = menu.addMenu(tr("Canal"))
+        group = QActionGroup(channels)
+        for ch, text, key in (("rgb", tr("Color (RGB)"), "C"), ("r", tr("Rojo"), "R"), ("g", tr("Verde"), "G"),
+                              ("b", tr("Azul"), "B"), ("a", tr("Alfa"), "Shift+A")):
+            group.addAction(add(text, lambda _=False, c=ch: self.channel_box.setCurrentIndex(CHANNELS.index(c)),
+                                key, self.viewer.channel == ch, target=channels))
+        add(tr("Fondo de cuadros (alfa)"), self._toggle_checker, "A", self.viewer.checker)
+        add(tr("Exposición 0 y gamma 1"), self.reset_view, "0",
+            enabled=self.viewer.exposure != 0 or self.viewer.gamma != 1)
+        menu.addSeparator()
+        add(tr("Ajustar a la ventana"), self.viewer.fit, "F")
+        add(tr("Tamaño real (100 %)"), self.viewer.actual_size, "1")
+        add(tr("Pantalla completa"), self.toggle_fullscreen, "F11", self.isFullScreen())
+        menu.addSeparator()
+        add(tr("Abrir…"), self._ask_open, "Ctrl+O")
+        add(tr("Buscar fotogramas nuevos"), self.refresh, "F5", enabled=bool(self.paths))
+        menu.exec(pos)
+
+    def _toggle_checker(self):
+        self.viewer.checker = not self.viewer.checker
+        self.viewer.update()
+
     def toggle_fullscreen(self):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
 
@@ -1091,6 +1732,10 @@ class Player(QWidget):
             self.set_channel("rgb")
         elif text == "a" and event.modifiers() & Qt.ShiftModifier:
             self.set_channel("a")
+        elif text == "m":
+            self.panel.mute.toggle()
+        elif text == "v":
+            self.toggle_panel()
         elif text == "e":
             shift = event.modifiers() & Qt.ShiftModifier
             self.nudge_view(self.exposure_box, -EXPOSURE_STEP if shift else EXPOSURE_STEP)
@@ -1100,8 +1745,7 @@ class Player(QWidget):
         elif text == "0":
             self.reset_view()
         elif text == "a":
-            self.viewer.checker = not self.viewer.checker
-            self.viewer.update()
+            self._toggle_checker()
         elif text == "[":
             self._nudge_fps(-1)
         elif text == "]":
@@ -1153,6 +1797,7 @@ class Player(QWidget):
         self.timeline.update()
 
     def closeEvent(self, event):
+        self.prefs.setValue("seqview/look_panel", self.panel.isVisible())
         self.timer.stop()
         self.cache.pool.clear()
         super().closeEvent(event)

@@ -89,6 +89,15 @@ lista como un vídeo (`render_####.png · 250 fotogramas`) y se convierte con cu
   Ctrl+R (o el botón ⟳) para añadir los fotogramas nuevos de un render que sigue en marcha y
   volver a leer los que se hayan re-renderizado. Lo que Qt no sabe leer (EXR sin
   `kimageformats`) lo lee ffmpeg.
+- En el visor, el botón de la cámara (o V) abre a la derecha los **efectos de cámara**, para
+  ver cómo quedaría la secuencia rodada con una cámara de verdad: distorsión, aberración
+  cromática, viñeteado, halación, grano de película o ruido de sensor, y color, brillo y
+  contraste. Cada efecto se enciende con su casilla, se pliega con su flecha y vuelve a sus
+  valores con su botón; Ctrl+clic en un deslizador lo devuelve a su valor. Arriba hay cámaras
+  completas (cine digital, 35 mm 500T o 250D, 16 mm, Super 8, objetivo antiguo, réflex, cámara
+  de acción, móvil). Los valores salen de medidas reales (LensTip, Imatest, lensfun, las fichas
+  de Kodak VISION3, DxOMark). M los silencia para comparar con el original; al abrir vienen
+  silenciados. También están en el menú del botón derecho de la imagen.
 
 **De vídeo a imágenes.** El destino **Imágenes** guarda cada fotograma en una carpeta con el
 nombre del vídeo (`clip/clip_0001.png`…). PNG y TIFF conservan la transparencia y los 16

@@ -27,6 +27,9 @@ def data_keys():
     for table in (preset_dialog.RESOLUTIONS, preset_dialog.FPS, preset_dialog.IMAGE_FPS,
                   preset_dialog.SPEEDS):
         keys |= {text for text, _ in table}
+    from konvi.core import look
+    from konvi.ui import seqview
+    keys |= set(look.PRESETS) | set(seqview.LookPanel.TITLES.values())
     return keys
 
 
