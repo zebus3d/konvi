@@ -592,7 +592,9 @@ class PanelTests(unittest.TestCase):
         self.assertFalse(panel.bodies["grain"].isVisible())
         self.assertIn("grain", panel.folded())
         panel.boxes["grain"].setChecked(False)
-        panel.boxes["grain"].setChecked(True)                      # al encenderlo se despliega
+        panel.boxes["grain"].setChecked(True)                      # encenderlo no lo despliega
+        self.assertFalse(panel.bodies["grain"].isVisible())
+        panel.set_expanded("grain", True)
         self.assertTrue(panel.bodies["grain"].isVisible())
         panel.close()
 

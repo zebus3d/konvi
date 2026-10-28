@@ -1113,8 +1113,7 @@ class LookPanel(QWidget):
 
     def _effect_toggled(self, effect, on):
         if on:
-            self.expanded[effect] = True        # al encender un efecto, se ven sus ajustes
-            self.mute.setChecked(False)         # y se ve el efecto, aunque estuvieran silenciados
+            self.mute.setChecked(False)         # se ve el efecto, aunque estuvieran silenciados
         self._refresh_section(effect)
 
     def set_expanded(self, effect, open_):
