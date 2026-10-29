@@ -53,6 +53,7 @@ De dónde salen los valores por defecto:
 """
 
 import copy
+import json
 import math
 import os
 import threading
@@ -226,6 +227,38 @@ def matching_preset(settings):
         if merged(settings) == preset_settings(name):
             return name
     return None
+
+
+# Los presets propios: los ajustes completos de cada uno, en un JSON de la configuración del
+# usuario, así que sirven en cualquier secuencia y en cualquier proyecto.
+
+def user_presets_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "seqview", "presets.json")
+
+
+def load_user_presets(path=None):
+    """{nombre: ajustes completos}; vacío si el fichero no está o no se puede leer."""
+    try:
+        with open(path or user_presets_path(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(name): merged(values) for name, values in data.items()
+            if isinstance(values, dict) and str(name) not in PRESETS}
+
+
+def save_user_presets(presets, path=None):
+    """Escribe todos los presets propios; primero a un temporal, para no dejar el fichero a medias."""
+    path = path or user_presets_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({name: presets[name] for name in sorted(presets, key=str.lower)}, f,
+                  ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
 
 
 # ------------------------------------------------------------------ hilos

@@ -11,20 +11,23 @@ import math
 import os
 import re
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 
-from PySide6.QtCore import (QElapsedTimer, QObject, QPointF, QRectF, QRunnable, QSettings, Qt,
+from PySide6.QtCore import (QElapsedTimer, QEvent, QObject, QPointF, QRectF, QRunnable, QSettings, Qt,
                             QThreadPool, QTimer, Signal)
 from PySide6.QtGui import (QActionGroup, QBrush, QColor, QColorSpace, QFont, QIcon, QImage,
                            QImageReader, QPainter, QPainterPath, QPen, QPixmap)
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QFrame, QHBoxLayout, QLabel, QMenu, QProgressBar,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                               QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QInputDialog,
+                               QLabel, QMenu, QMessageBox, QProgressBar,
                                QPushButton, QScrollArea, QSlider, QStyle, QStyleOptionSlider, QToolButton,
                                QVBoxLayout, QWidget)
 
+from ..core import gpu
 from ..core import look as fx
 from ..i18n import number as fmt_number, tr
 
@@ -34,6 +37,7 @@ ICONS = Path(__file__).resolve().parent.parent / "icons"
 EXTS = {"png", "jpg", "jpeg", "tif", "tiff", "exr", "tga", "bmp", "webp", "psd", "hdr",
         "jxl", "avif", "heic", "heif", "jp2", "qoi", "pfm", "dds"}
 FRAME_RE = re.compile(r"^(.*?)(\d+)(\.[^.]+)$")
+GPU = gpu.Engine()  # los efectos en la gráfica; la que se usa la elige Player (preferencias)
 
 
 # ------------------------------------------------------------------ secuencias
@@ -434,6 +438,10 @@ def develop(image, exposure=0.0, gamma=1.0, channel="rgb", look=None, frame=0):
     has_alpha = image.hasAlphaChannel() and channel == "rgb"
     if look is not None and look.active():
         # con efectos se revela como un EXR: lineal en media precisión, por la misma tabla
+        shown = _develop_gpu(image, look, frame, lambda half: _reveal(half.view(np.uint16), True, has_alpha,
+                                                                       exposure, gamma, channel))
+        if shown is not None:
+            return shown
         rgba = look.apply(linear_rgba(image), frame)
         half = np.empty(rgba.shape, np.float16)
         _by_bands(rgba.shape[0], lambda rows: np.copyto(half[rows], rgba[rows], casting="unsafe"))
@@ -444,6 +452,22 @@ def develop(image, exposure=0.0, gamma=1.0, channel="rgb", look=None, frame=0):
     if not hdr:
         image = image.convertToFormat(QImage.Format_RGBA8888)
     return _reveal(_pixels(image, np.uint16 if hdr else np.uint8), hdr, has_alpha, exposure, gamma, channel)
+
+
+def _develop_gpu(image, look, frame, reveal):
+    """Los efectos en la gráfica: se le pasa el fotograma tal como está (8 o 16 bits, o half),
+    lo pasa ella a lineal y devuelve el half que se pinta. None si no hay gráfica."""
+    if GPU.choice == "cpu":
+        return None
+    if is_hdr(image):
+        src = _pixels(image, np.float16)
+    elif image.format() in DEEP_FORMATS:
+        image = image.convertToFormat(QImage.Format_RGBA64)     # que viva mientras se lee
+        src = _pixels(image, np.uint16)
+    else:
+        image = image.convertToFormat(QImage.Format_RGBA8888)
+        src = _pixels(image, np.uint8)
+    return GPU.develop(look.settings, src, frame, reveal)
 
 
 def _reveal(src, hdr, has_alpha, exposure, gamma, channel):
@@ -561,7 +585,7 @@ class Viewer(QWidget):
         self.zoom = None            # None = ajustar a la ventana
         self.pan = QPointF(0, 0)
         self.checker = False
-        self.fast = False           # sin suavizado mientras se reproduce
+        self._fitted = None         # (clave, imagen reducida al tamaño en pantalla)
         self.exposure = 0.0         # pasos de diafragma, en lineal
         self.gamma = 1.0
         self.channel = "rgb"        # o solo "r", "g", "b", "a" (en gris)
@@ -629,6 +653,20 @@ class Viewer(QWidget):
     def contextMenuEvent(self, event):
         self.menu_requested.emit(event.globalPos())
 
+    def fitted(self, shown, rect):
+        """Lo que se pinta en rect: reducido con la media de cada zona (la de QImage.scaled), no
+        bilineal, que al reducir más de la mitad deja dientes de sierra y bordes que bailan al
+        reproducir. Cuesta 1-2 ms un 4K y se guarda mientras no cambien imagen ni tamaño;
+        ampliando (o casi al 100 %), se pinta tal cual, suavizado."""
+        dpr = self.devicePixelRatioF()
+        w, h = round(rect.width() * dpr), round(rect.height() * dpr)
+        if w >= shown.width() * 0.75 or w < 1 or h < 1:
+            return shown
+        key = (shown.cacheKey(), w, h)
+        if self._fitted is None or self._fitted[0] != key:
+            self._fitted = (key, shown.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
+        return self._fitted[1]
+
     def _paint(self, p):
         p.fillRect(self.rect(), QColor("#1b1b1b"))
         if self.image is not None:
@@ -636,8 +674,8 @@ class Viewer(QWidget):
             shown = self.displayed()
             if self.checker and shown.hasAlphaChannel():
                 p.fillRect(rect, self._checker)
-            p.setRenderHint(QPainter.SmoothPixmapTransform, not self.fast)
-            p.drawImage(rect, shown)
+            p.setRenderHint(QPainter.SmoothPixmapTransform)
+            p.drawImage(rect, self.fitted(shown, rect))
         if self.message:
             p.setPen(QColor("#e0e0e0"))
             p.drawText(self.rect(), Qt.AlignCenter, self.message)
@@ -1227,6 +1265,90 @@ class LutPicker(QWidget):
         self.name.setToolTip(self.path)
 
 
+def gpu_choice(prefs):
+    """La gráfica de las preferencias ("auto", "cpu" o {name, node}); KONVI_GPU manda."""
+    try:
+        choice = json.loads(os.environ.get("KONVI_GPU") or prefs.value("seqview/gpu", '"auto"'))
+    except (TypeError, ValueError):
+        return "auto"
+    return choice if choice in ("auto", "cpu") or isinstance(choice, dict) else "auto"
+
+
+def gpu_label(name):
+    """El nombre de la gráfica sin lo que añade el driver: «/PCIe/SSE2» en NVIDIA,
+    «(radeonsi, renoir…)» en Mesa."""
+    return re.sub(r"\s*\(.*\)$", "", name.split("/")[0])
+
+
+class _DevicesFound(QObject):
+    found = Signal(object)
+
+
+class PrefsDialog(QDialog):
+    """Preferencias del visor: con qué gráfica se calculan los efectos."""
+
+    def __init__(self, choice, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Preferencias"))
+        self.gpu = QComboBox()
+        self.gpu.setToolTip(tr("Dónde se calculan los efectos de cámara.\n"
+                               "Automática: la más rápida, medida la primera vez (y otra vez si cambian las\n"
+                               "tarjetas). El resultado es el mismo con cualquiera."))
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._choice = choice
+        self._fill([])
+        self.gpu.setEnabled(False)
+        self.status.setText(tr("Buscando las gráficas…"))
+        form = QFormLayout()
+        form.addRow(tr("Gráfica para los efectos:"), self.gpu)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(self.status)
+        lay.addWidget(buttons)
+        # buscarlas despierta cada gráfica (un segundo o más): en un hilo, con la ventana ya abierta
+        self._bridge = _DevicesFound()
+        self._bridge.found.connect(self._found, Qt.QueuedConnection)
+        threading.Thread(target=lambda: self._bridge.found.emit(GPU.devices()), daemon=True).start()
+
+    def _fill(self, devices):
+        self.gpu.clear()
+        # vienen de la más rápida a la más lenta: la automática es la primera
+        self.gpu.addItem(tr("Automática: la más rápida ({name})", name=gpu_label(devices[0]["name"])) if devices
+                         else tr("Automática: la más rápida"), "auto")
+        for d in devices:
+            self.gpu.addItem(gpu_label(d["name"]) + (tr(" (la de la pantalla)") if d["display"] else ""), d)
+        self.gpu.addItem(tr("Ninguna: el procesador (más lento)"), "cpu")
+        current = 0
+        for i in range(self.gpu.count()):
+            data = self.gpu.itemData(i)
+            if data == self._choice or (isinstance(data, dict) and isinstance(self._choice, dict)
+                                        and data["name"] == self._choice.get("name")):
+                current = i
+        self.gpu.setCurrentIndex(current)
+
+    def _found(self, devices):
+        self._fill(devices)
+        self.gpu.setEnabled(True)
+        if GPU.name:
+            self.status.setText(tr("Ahora se usa: {name}.", name=gpu_label(GPU.name)))
+        elif GPU.error:
+            self.status.setText(tr("La gráfica ha fallado ({error}); los efectos se calculan en el procesador.",
+                                   error=GPU.error))
+        elif not devices:
+            self.status.setText(tr("No se ha encontrado ninguna gráfica con OpenGL 4.3: los efectos se "
+                                   "calculan en el procesador."))
+        else:
+            self.status.setText(tr("La gráfica se abre al ver el primer fotograma con efectos."))
+
+    def choice(self):
+        return self.gpu.currentData()
+
+
 class LookPanel(QWidget):
     """Barra lateral con los efectos de cámara: cada uno con su casilla para encenderlo y sus
     ajustes debajo (solo se ven los de los que están encendidos), y las cámaras completas
@@ -1251,14 +1373,28 @@ class LookPanel(QWidget):
         self.boxes, self.bodies, self.rows = {}, {}, {}
         self.arrows, self.expanded = {}, {}
 
+        self.user_presets = fx.load_user_presets()
         self.preset = QComboBox()
-        self.preset.addItem(tr("Personalizado"))
-        for name in fx.PRESETS:
-            self.preset.addItem(tr(name), name)
         self.preset.setToolTip(tr("Una cámara completa: enciende los efectos que lleva con sus valores.\n"
-                               "Después se puede retocar cada uno."))
+                                  "Después se puede retocar cada uno. Debajo de la raya, los presets propios."))
         self.preset.setFocusPolicy(Qt.ClickFocus)
         self.preset.activated.connect(self._preset_chosen)
+        # los presets propios se guardan para el usuario: valen en cualquier secuencia o proyecto
+        # (y son los mismos que los del seqview de dolphin-video-tools)
+        self.save_preset = QToolButton()
+        self.save_preset.setIcon(QIcon.fromTheme("document-save-as"))
+        self.save_preset.setAutoRaise(True)
+        self.save_preset.setFocusPolicy(Qt.NoFocus)
+        self.save_preset.setToolTip(tr("Guardar los ajustes actuales como preset propio,\n"
+                                       "para cargarlo luego en cualquier secuencia"))
+        self.save_preset.clicked.connect(self.ask_save_preset)
+        self.delete_preset = QToolButton()
+        self.delete_preset.setIcon(QIcon.fromTheme("edit-delete"))
+        self.delete_preset.setAutoRaise(True)
+        self.delete_preset.setFocusPolicy(Qt.NoFocus)
+        self.delete_preset.setToolTip(tr("Borrar el preset propio elegido"))
+        self.delete_preset.clicked.connect(self.ask_delete_preset)
+        self._fill_presets()
 
         content = QWidget()
         col = QVBoxLayout(content)
@@ -1280,7 +1416,12 @@ class LookPanel(QWidget):
         header.addWidget(self.mute)
         col.addLayout(header)
         col.addWidget(QLabel(tr("Cámara")))
-        col.addWidget(self.preset)
+        presets = QHBoxLayout()
+        presets.setSpacing(2)
+        presets.addWidget(self.preset, 1)
+        presets.addWidget(self.save_preset)
+        presets.addWidget(self.delete_preset)
+        col.addLayout(presets)
 
         D = fx.DEFAULTS
         self._section(col, "distortion", [
@@ -1580,11 +1721,10 @@ class LookPanel(QWidget):
             self.changed.emit()
 
     def _refresh_section(self, effect):
-        """Los ajustes se ven si el efecto está encendido y su sección desplegada."""
+        """Los ajustes se ven si su sección está desplegada, aunque el efecto esté apagado."""
         open_ = self.expanded[effect]
         self.arrows[effect].setArrowType(Qt.DownArrow if open_ else Qt.RightArrow)
-        self.arrows[effect].setEnabled(self.boxes[effect].isChecked())
-        self.bodies[effect].setVisible(self.boxes[effect].isChecked() and open_)
+        self.bodies[effect].setVisible(open_)
 
     def _effect_toggled(self, effect, on):
         if on:
@@ -1617,8 +1757,82 @@ class LookPanel(QWidget):
 
     def apply_preset(self, name):
         """Elegir una cámara es querer verla: si los efectos estaban silenciados, dejan de estarlo."""
-        self.set_settings(fx.preset_settings(name), emit=True)
+        settings = self.user_presets[name] if name in self.user_presets else fx.preset_settings(name)
+        self.set_settings(settings, emit=True)
         self.mute.setChecked(False)
+
+    def matching_preset(self, settings=None):
+        """El preset (de fábrica o propio) que coincide con estos ajustes, o None."""
+        settings = fx.merged(settings if settings is not None else self.settings())
+        name = fx.matching_preset(settings)
+        if name:
+            return name
+        return next((n for n, p in self.user_presets.items() if p == settings), None)
+
+    def _fill_presets(self):
+        """Personalizado, los de fábrica y, tras una raya, los propios, por orden alfabético
+        (los propios, con el nombre que se les dio, sin traducir)."""
+        self.preset.blockSignals(True)
+        self.preset.clear()
+        self.preset.addItem(tr("Personalizado"))
+        for name in fx.PRESETS:
+            self.preset.addItem(tr(name), name)
+        if self.user_presets:
+            self.preset.insertSeparator(self.preset.count())
+            for name in sorted(self.user_presets, key=str.lower):
+                self.preset.addItem(name, name)
+        self.preset.blockSignals(False)
+        if self.boxes:
+            self._sync()
+
+    def _reload_presets(self):
+        """Otra ventana (o el otro seqview) puede haber guardado o borrado alguno."""
+        self.user_presets = fx.load_user_presets()
+        self._fill_presets()
+
+    def ask_save_preset(self):
+        self._reload_presets()
+        current = self.preset.currentData()
+        name, ok = QInputDialog.getText(self, tr("Guardar preset"), tr("Nombre del preset:"),
+                                        text=current if current in self.user_presets else "")
+        name = name.strip()
+        if ok and name:
+            if name in fx.PRESETS:
+                QMessageBox.warning(self, tr("Guardar preset"),
+                                    tr("«{name}» es una de las cámaras de fábrica. Elige otro nombre.", name=name))
+            elif name not in self.user_presets or QMessageBox.question(
+                    self, tr("Guardar preset"),
+                    tr("Ya hay un preset «{name}». ¿Reemplazarlo?", name=name)) == QMessageBox.Yes:
+                self.store_preset(name)
+        self.done_editing.emit()
+
+    def store_preset(self, name):
+        presets = dict(self.user_presets, **{name: self.settings()})
+        try:
+            fx.save_user_presets(presets)
+        except OSError as e:
+            QMessageBox.warning(self, tr("Guardar preset"), tr("No se ha podido guardar.\n\n{error}", error=e))
+            return
+        self.user_presets = presets
+        self._fill_presets()
+
+    def ask_delete_preset(self):
+        name = self.preset.currentData()
+        if name in self.user_presets and QMessageBox.question(
+                self, tr("Borrar preset"), tr("¿Borrar el preset «{name}»?", name=name)) == QMessageBox.Yes:
+            self.remove_preset(name)
+        self.done_editing.emit()
+
+    def remove_preset(self, name):
+        self._reload_presets()
+        presets = {n: p for n, p in self.user_presets.items() if n != name}
+        try:
+            fx.save_user_presets(presets)
+        except OSError as e:
+            QMessageBox.warning(self, tr("Borrar preset"), tr("No se ha podido borrar.\n\n{error}", error=e))
+            return
+        self.user_presets = presets
+        self._fill_presets()
 
     def _preset_chosen(self, index):
         if index > 0:
@@ -1630,8 +1844,9 @@ class LookPanel(QWidget):
         for w, show in ((self.stock, film), (self.gauge, film), (self.iso, not film)):
             self._grain_form.setRowVisible(w, show)
         self.rows[("grain", "nr")].setVisible(not film)
-        name = fx.matching_preset(self.settings())
+        name = self.matching_preset()
         self.preset.setCurrentIndex(self.preset.findData(name) if name else 0)
+        self.delete_preset.setEnabled(name in self.user_presets)
 
     def _emit(self, *_):
         if self._loading:
@@ -1689,6 +1904,8 @@ def view_slider(box, log=False):
 
 
 class Player(QWidget):
+    gpu_failed = Signal(str)
+
     def __init__(self, paths, fps=DEFAULT_FPS, autoplay=False, parent=None):
         super().__init__(parent, Qt.Window)         # ventana propia, que se cierra con Konvi
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -1712,6 +1929,10 @@ class Player(QWidget):
         self.viewer.store = self.cache
         self.timeline = Timeline(self.cache)
         self.prefs = QSettings("konvi", "konvi")
+        GPU.set_choice(gpu_choice(self.prefs))
+        self._gpu_error = self.gpu_failed.emit  # puede llegar desde otro hilo
+        GPU.on_error = self._gpu_error
+        self.gpu_failed.connect(self._gpu_failed)
         self.panel = LookPanel()
         try:
             self.panel.set_settings(json.loads(self.prefs.value("seqview/look", "{}")))
@@ -1734,6 +1955,9 @@ class Player(QWidget):
         self.panel.mute_toggled.connect(self._mute)
         self.panel.auto_levels_requested.connect(self.auto_levels)
         self.panel.done_editing.connect(self.setFocus)
+        # Mayús+flechas van al principio o al final aunque el foco esté en una casilla numérica
+        # (que las usaría para seleccionar texto): se miran antes de que le lleguen
+        QApplication.instance().installEventFilter(self)
         self.btn_refresh = tool_button("refresh", tr("Buscar fotogramas nuevos o cambiados (Ctrl+R, F5)\n"
                                                      "Para ver un render que sigue en marcha sin volver a abrirlo."),
                                        self.refresh)
@@ -1854,9 +2078,8 @@ class Player(QWidget):
         self.viewer.scrub_finished.connect(self._scrub_end)
         self.viewer.clicked.connect(self._click)
         self.viewer.menu_requested.connect(self._context_menu)
-        # al abrir, los efectos guardados vienen silenciados: se ve el render tal cual y con M
-        # (o el ojo del panel) vuelven tal como se dejaron
-        if self.viewer.look.active():
+        # al abrir, los efectos vienen como se dejaron: activos, o silenciados si se cerró así
+        if self.viewer.look.active() and self.prefs.value("seqview/look_muted", False, type=bool):
             self.panel.mute.setChecked(True)
         self.open(paths)
 
@@ -2037,7 +2260,6 @@ class Player(QWidget):
         elif self.paths:
             if not self.loop and self.current == len(self.paths) - 1:
                 self.seek(0)
-            self.viewer.fast = True
             self._shown_frames = 0
             self._fps_clock.start()
             self._play_clock.start()
@@ -2051,9 +2273,6 @@ class Player(QWidget):
             self.timer.stop()
             self.btn_play.setIcon(icon("play"))
             self.real_fps = 0.0
-        if self.viewer.fast:
-            self.viewer.fast = False
-            self.viewer.update()
             self._refresh_status()
 
     def _tick(self):
@@ -2150,6 +2369,7 @@ class Player(QWidget):
 
     def _mute(self, on):
         self.viewer.bypass = on
+        self.prefs.setValue("seqview/look_muted", on)
         if self.viewer.look.active():       # con el panel cerrado, que se sepa qué se está viendo
             self._show_notice(tr("Efectos silenciados (M)") if on else tr("Efectos activos"))
         self.viewer.update()
@@ -2184,11 +2404,18 @@ class Player(QWidget):
                 checked=settings[effect]["on"], target=effects)
         effects.addSeparator()
         cameras = effects.addMenu(tr("Cámara"))
-        current = fx.matching_preset(settings)
+        self.panel._reload_presets()
+        current = self.panel.matching_preset(settings)
         presets = QActionGroup(cameras)         # se marcan como opciones, una sola a la vez
         for name in fx.PRESETS:
             presets.addAction(add(tr(name), lambda _=False, n=name: self.panel.apply_preset(n),
                                   checked=name == current, target=cameras))
+        if self.panel.user_presets:
+            cameras.addSeparator()
+        for name in sorted(self.panel.user_presets, key=str.lower):
+            presets.addAction(add(name, lambda _=False, n=name: self.panel.apply_preset(n),
+                                  checked=name == current, target=cameras))
+        add(tr("Guardar como preset…"), self.panel.ask_save_preset, target=cameras)
         add(tr("Quitar todos"), lambda: self.panel.set_settings(fx.default_settings(), emit=True),
             enabled=self.viewer.look.active(), target=effects)
         channels = menu.addMenu(tr("Canal"))
@@ -2206,6 +2433,7 @@ class Player(QWidget):
         add(tr("Pantalla completa"), self.toggle_fullscreen, "F11", self.isFullScreen())
         menu.addSeparator()
         add(tr("Abrir…"), self._ask_open, "Ctrl+O")
+        add(tr("Preferencias…"), self.show_prefs, "Ctrl+,")
         add(tr("Buscar fotogramas nuevos"), self.refresh, "F5", enabled=bool(self.paths))
         menu.exec(pos)
 
@@ -2215,6 +2443,26 @@ class Player(QWidget):
 
     def toggle_fullscreen(self):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
+
+    def show_prefs(self):
+        dialog = PrefsDialog(GPU.choice, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        choice = dialog.choice()
+        self.prefs.setValue("seqview/gpu", json.dumps(choice))
+        GPU.set_choice(choice)
+
+    def _gpu_failed(self, error):
+        self._show_notice(tr("La gráfica ha fallado: los efectos siguen en el procesador"), 6000)
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.KeyPress and event.modifiers() == Qt.ShiftModifier
+                and event.key() in (Qt.Key_Left, Qt.Key_Right)
+                and isinstance(obj, QWidget) and obj.window() is self and obj is not self):
+            self._scrub(len(self.paths) - 1 if event.key() == Qt.Key_Right else 0)
+            self.setFocus()
+            return True
+        return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event):
         key, text = event.key(), event.text().lower()
@@ -2308,4 +2556,8 @@ class Player(QWidget):
         self.prefs.setValue("seqview/look_panel", self.panel.isVisible())
         self.timer.stop()
         self.cache.pool.clear()
+        QApplication.instance().removeEventFilter(self)
+        if GPU.on_error is self._gpu_error:
+            GPU.on_error = None             # la ventana se borra al cerrarse; Konvi sigue
+        GPU.close()
         super().closeEvent(event)

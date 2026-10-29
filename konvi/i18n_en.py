@@ -609,8 +609,8 @@ EN = {
         'Tint',
     'Tipo':
         'Type',
-    'Una cámara completa: enciende los efectos que lleva con sus valores.\nDespués se puede retocar cada uno.':
-        'A complete camera: turns on its effects with their values.\nYou can then tweak each one.',
+    'Una cámara completa: enciende los efectos que lleva con sus valores.\nDespués se puede retocar cada uno. Debajo de la raya, los presets propios.':
+        'A complete camera: turns on its effects with their values.\nYou can then tweak each one. Below the line, your own presets.',
     'Verde':
         'Green',
     'Verde (negativo) ↔ magenta (positivo), en perpendicular a la temperatura.\nCorrige la luz verdosa de fluorescentes y LED.':
@@ -735,4 +735,43 @@ EN = {
         'To the right, more green; to the left, more magenta.',
     'Hacia la derecha, más azul; hacia la izquierda, más amarillo.':
         'To the right, more blue; to the left, more yellow.',
+
+    # ---------------------------------------------------------------- visor: presets propios
+    "Guardar los ajustes actuales como preset propio,\npara cargarlo luego en cualquier secuencia":
+        "Save the current settings as your own preset,\nto load it later in any sequence",
+    "Borrar el preset propio elegido": "Delete the selected preset of your own",
+    "Guardar preset": "Save preset",
+    "Nombre del preset:": "Preset name:",
+    "«{name}» es una de las cámaras de fábrica. Elige otro nombre.":
+        "“{name}” is one of the built-in cameras. Choose another name.",
+    "Ya hay un preset «{name}». ¿Reemplazarlo?": "There is already a preset “{name}”. Replace it?",
+    "No se ha podido guardar.\n\n{error}": "Could not save it.\n\n{error}",
+    "Borrar preset": "Delete preset",
+    "¿Borrar el preset «{name}»?": "Delete the preset “{name}”?",
+    "No se ha podido borrar.\n\n{error}": "Could not delete it.\n\n{error}",
+    "Guardar como preset…": "Save as preset…",
+    # ---------------------------------------------------------------- visor: la gráfica
+    "Preferencias": "Preferences",
+    "Preferencias…": "Preferences…",
+    "Dónde se calculan los efectos de cámara.\n"
+    "Automática: la más rápida, medida la primera vez (y otra vez si cambian las\n"
+    "tarjetas). El resultado es el mismo con cualquiera.":
+        "Where the camera effects are computed.\n"
+        "Automatic: the fastest one, measured the first time (and again if the graphics\n"
+        "cards change). The result is the same with any of them.",
+    "Buscando las gráficas…": "Looking for graphics cards…",
+    "Gráfica para los efectos:": "Graphics card for the effects:",
+    "Automática: la más rápida ({name})": "Automatic: the fastest ({name})",
+    "Automática: la más rápida": "Automatic: the fastest",
+    " (la de la pantalla)": " (the one driving the display)",
+    "Ninguna: el procesador (más lento)": "None: the CPU (slower)",
+    "Ahora se usa: {name}.": "Now in use: {name}.",
+    "La gráfica ha fallado ({error}); los efectos se calculan en el procesador.":
+        "The graphics card failed ({error}); the effects are computed on the CPU.",
+    "No se ha encontrado ninguna gráfica con OpenGL 4.3: los efectos se calculan en el procesador.":
+        "No graphics card with OpenGL 4.3 was found: the effects are computed on the CPU.",
+    "La gráfica se abre al ver el primer fotograma con efectos.":
+        "The graphics card is opened when the first frame with effects is shown.",
+    "La gráfica ha fallado: los efectos siguen en el procesador":
+        "The graphics card failed: the effects carry on on the CPU",
 }

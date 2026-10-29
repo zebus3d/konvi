@@ -9,6 +9,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _config = tempfile.TemporaryDirectory()
 os.environ["XDG_CONFIG_HOME"] = _config.name       # que los ajustes guardados no toquen los de verdad
+os.environ.setdefault("KONVI_GPU", '"cpu"')        # numpy: las pruebas de la gráfica van aparte (test_gpu)
 
 from PySide6.QtCore import QCoreApplication, QElapsedTimer, Qt  # noqa: E402
 from PySide6.QtGui import QColor  # noqa: E402
@@ -32,6 +33,10 @@ def wait_until(cond, ms=10000):
 class SeqviewTests(unittest.TestCase):
     def setUp(self):
         i18n.set_language("es")              # las comprobaciones de texto están en español
+        # cada prueba abre sin los efectos que haya guardado otra (ahora se abren activos)
+        prefs = seqview.QSettings("konvi", "konvi")
+        prefs.remove("seqview/look")
+        prefs.remove("seqview/look_muted")
 
     @classmethod
     def setUpClass(cls):
@@ -300,6 +305,15 @@ class SeqviewTests(unittest.TestCase):
             QTest.keyClick(player, Qt.Key_Right, Qt.ShiftModifier)       # como en Blender
             self.assertEqual(player.current, len(player.paths) - 1)
             QTest.keyClick(player, Qt.Key_Left, Qt.ShiftModifier)
+            self.assertEqual(player.current, 0)
+            # también con el foco en una casilla numérica, que las usaría para seleccionar texto
+            player.seek(10)
+            for box in (player.exposure_box, player.panel.rows[("grain", "amount")].spin):
+                QTest.keyClick(box, Qt.Key_Right, Qt.ShiftModifier)
+                self.assertEqual(player.current, len(player.paths) - 1)
+                QTest.keyClick(box, Qt.Key_Left, Qt.ShiftModifier)
+                self.assertEqual(player.current, 0)
+            QTest.keyClick(player.exposure_box, Qt.Key_Right)              # sin Mayús, sigue siendo de la casilla
             self.assertEqual(player.current, 0)
         finally:
             player.close()
@@ -805,6 +819,12 @@ class PanelTests(unittest.TestCase):
         self.assertFalse(panel.bodies["grain"].isVisible())
         panel.set_expanded("grain", True)
         self.assertTrue(panel.bodies["grain"].isVisible())
+        panel.boxes["grain"].setChecked(False)                     # apagado, sigue desplegado
+        self.assertTrue(panel.bodies["grain"].isVisible())
+        panel.set_expanded("grain", False)
+        panel.set_expanded("grain", True)                          # y se puede desplegar apagado
+        self.assertTrue(panel.arrows["grain"].isEnabled())
+        self.assertTrue(panel.bodies["grain"].isVisible())
         panel.close()
 
     def test_al_abrir_todo_plegado(self):
@@ -933,24 +953,81 @@ class MuteTests(unittest.TestCase):
             self.assertTrue(player.viewer.bypass)
         finally:
             player.prefs.remove("seqview/look")         # que las demás pruebas no hereden el viñeteado
+            player.prefs.remove("seqview/look_muted")
             player.close()
 
 
+class UserPresetTests(unittest.TestCase):
+    def setUp(self):
+        i18n.set_language("es")
+
+    def tearDown(self):
+        Path(seqview.fx.user_presets_path()).unlink(missing_ok=True)
+
+    def test_guardar_cargar_y_borrar(self):
+        panel = seqview.LookPanel()
+        settings = seqview.fx.preset_settings("Super 8 (500T)")
+        settings["vignette"]["amount"] = -0.9
+        settings["sharpen"]["on"] = True
+        panel.set_settings(settings)
+        self.assertEqual(panel.preset.currentIndex(), 0)              # personalizado
+        self.assertFalse(panel.delete_preset.isEnabled())
+        panel.store_preset("Mi Super 8")
+        self.assertEqual(panel.preset.currentData(), "Mi Super 8")     # ya es un preset
+        self.assertTrue(panel.delete_preset.isEnabled())
+        other = seqview.LookPanel()                                    # otra ventana, otro proyecto
+        other.apply_preset("Mi Super 8")
+        self.assertEqual(other.settings()["vignette"]["amount"], -0.9)
+        self.assertTrue(other.settings()["sharpen"]["on"])
+        self.assertEqual(other.preset.currentData(), "Mi Super 8")
+        i18n.set_language("en")                                        # los propios no se traducen
+        other._fill_presets()
+        self.assertEqual(other.preset.currentText(), "Mi Super 8")
+        i18n.set_language("es")
+        other.remove_preset("Mi Super 8")
+        self.assertEqual(seqview.fx.load_user_presets(), {})
+        self.assertEqual(other.preset.currentIndex(), 0)
+        self.assertEqual(other.preset.findData("Mi Super 8"), -1)
+        panel.close()
+        other.close()
+
+    def test_fichero_roto_o_con_nombres_de_fabrica(self):
+        path = Path(seqview.fx.user_presets_path())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{no es json")
+        self.assertEqual(seqview.fx.load_user_presets(), {})
+        path.write_text('{"Super 8 (50D)": {}, "Viejo": {"grain": {"on": true}, "raro": 1}}')
+        presets = seqview.fx.load_user_presets()
+        self.assertEqual(list(presets), ["Viejo"])                     # no pisa los de fábrica
+        self.assertTrue(presets["Viejo"]["grain"]["on"])
+        self.assertEqual(set(presets["Viejo"]), set(seqview.fx.DEFAULTS))
+
+
 class StartupTests(unittest.TestCase):
-    def test_al_abrir_los_efectos_guardados_vienen_silenciados(self):
+    def test_al_abrir_los_efectos_vienen_como_se_dejaron(self):
         settings = seqview.fx.preset_settings("Cine 35 mm (500T)")
         first = seqview.Player([])
         try:
             first.panel.set_settings(settings, emit=True)          # se guardan
+            first.panel.mute.setChecked(False)
         finally:
             first.close()
         player = seqview.Player([])
         try:
-            self.assertTrue(player.viewer.bypass)                   # se ve el original
+            self.assertFalse(player.viewer.bypass)                  # activos, como se dejaron
+            self.assertFalse(player.panel.mute.isChecked())
+            self.assertEqual(player.panel.settings(), settings)
+            player.panel.mute.setChecked(True)                      # se cierra silenciado...
+        finally:
+            player.close()
+        player = seqview.Player([])
+        try:
+            self.assertTrue(player.viewer.bypass)                   # ...y se abre silenciado
             self.assertTrue(player.panel.mute.isChecked())
-            self.assertEqual(player.panel.settings(), settings)     # pero conserva lo que había
+            self.assertEqual(player.panel.settings(), settings)     # sin perder lo que había
         finally:
             player.prefs.remove("seqview/look")
+            player.prefs.remove("seqview/look_muted")
             player.close()
 
 

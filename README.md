@@ -97,9 +97,18 @@ lista como un vídeo (`render_####.png · 250 fotogramas`) y se convierte con cu
   valores con su botón; Ctrl+clic en un deslizador lo devuelve a su valor y con Mayús va más
   despacio, para afinar. Arriba hay cámaras
   completas (cine digital, 35 mm 500T o 250D, 16 mm, Super 8, objetivo antiguo, réflex, cámara
-  de acción, móvil). Los valores salen de medidas reales (LensTip, Imatest, lensfun, las fichas
-  de Kodak VISION3, DxOMark). M los silencia para comparar con el original; al abrir vienen
-  silenciados. También están en el menú del botón derecho de la imagen.
+  de acción, móvil), y al lado se guardan los ajustes de ahora como **preset propio**, para
+  cargarlo en cualquier secuencia (son los mismos que los del seqview de dolphin-video-tools:
+  `~/.config/seqview/presets.json`). Un efecto apagado también se puede desplegar. Los valores
+  salen de medidas reales (LensTip, Imatest, lensfun, las fichas de Kodak VISION3, DxOMark). M
+  los silencia para comparar con el original; al abrir vienen como se dejaron. También están en
+  el menú del botón derecho de la imagen.
+- Los efectos se calculan en la **gráfica**: con todos encendidos, un 1080p tarda unos 10-30 ms
+  en verse (en el procesador, unos 300 ms). En el menú del botón derecho → Preferencias se elige
+  cuál; «Automática» es la más rápida, medida la primera vez. Se abre en un proceso aparte con
+  EGL, sin ventana, así que funciona igual en Wayland; si el driver falla, avisa y sigue en el
+  procesador. Hace falta OpenGL 4.3. Reproduciendo se ve igual de bien que en pausa: al reducir
+  la imagen a la ventana se promedia cada zona, sin dientes de sierra.
 
 **De vídeo a imágenes.** El destino **Imágenes** guarda cada fotograma en una carpeta con el
 nombre del vídeo (`clip/clip_0001.png`…). PNG y TIFF conservan la transparencia y los 16
@@ -220,6 +229,7 @@ python3 -m unittest tests.test_core tests.test_i18n   # el motor y las traduccio
 python3 -m unittest tests.test_real_conversions  # cada perfil con ffmpeg de verdad (~1 min)
 python3 -m unittest tests.test_ui                # la ventana, sin pantalla
 python3 -m unittest tests.test_seqview           # el visor de secuencias, sin pantalla
+python3 -m unittest tests.test_gpu               # los efectos en la gráfica = numpy, en cada una
 ```
 
 ## Licencia
